@@ -20,10 +20,10 @@
  *     `Layer.succeed(ProviderEventLoggers, { native, canonical })` instead of
  *     juggling per-Layer option threading.
  *
- * Both fields are optional. `makeEventNdjsonLogger` returns `undefined` when
- * the target directory cannot be created; we forward that as `undefined`
- * rather than failing the boot Layer, matching the previous best-effort
- * behavior of `server.ts`.
+ * Both fields are optional. They remain undefined unless content-bearing
+ * provider logs are explicitly enabled. `makeEventNdjsonLogger` also returns
+ * `undefined` when the target directory cannot be created; we forward that
+ * rather than failing the boot Layer.
  *
  * @module provider/Layers/ProviderEventLoggers
  */
@@ -62,24 +62,38 @@ export const NoOpProviderEventLoggers: ProviderEventLoggersShape = {
   canonical: undefined,
 };
 
+export const makeProviderEventLoggers = Effect.fn("makeProviderEventLoggers")(function* (input: {
+  readonly enabled: boolean;
+  readonly providerEventLogPath: string;
+}) {
+  if (!input.enabled) {
+    return NoOpProviderEventLoggers;
+  }
+
+  const native = yield* makeEventNdjsonLogger(input.providerEventLogPath, {
+    stream: "native",
+  });
+  const canonical = yield* makeEventNdjsonLogger(input.providerEventLogPath, {
+    stream: "canonical",
+  });
+  return {
+    native,
+    canonical,
+  } satisfies ProviderEventLoggersShape;
+});
+
 /**
- * Live Layer that builds both loggers from `ServerConfig.providerEventLogPath`.
- * If the directory create fails for either stream, the corresponding field
- * is `undefined` and writes from that stream become no-ops downstream.
+ * Live Layer that builds both loggers from `ServerConfig.providerEventLogPath`
+ * after an explicit `logProviderEvents` opt-in. If logging is disabled, or if
+ * the directory create fails for either stream, writes become no-ops.
  */
 export const ProviderEventLoggersLive = Layer.effect(
   ProviderEventLoggers,
   Effect.gen(function* () {
-    const { providerEventLogPath } = yield* ServerConfig;
-    const native = yield* makeEventNdjsonLogger(providerEventLogPath, {
-      stream: "native",
+    const { logProviderEvents, providerEventLogPath } = yield* ServerConfig;
+    return yield* makeProviderEventLoggers({
+      enabled: logProviderEvents,
+      providerEventLogPath,
     });
-    const canonical = yield* makeEventNdjsonLogger(providerEventLogPath, {
-      stream: "canonical",
-    });
-    return {
-      native,
-      canonical,
-    } satisfies ProviderEventLoggersShape;
   }),
 );

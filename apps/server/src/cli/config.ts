@@ -16,6 +16,7 @@ import { Argument, Flag } from "effect/unstable/cli";
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
+import { ensureProductDataScope, ProductDataScopeId } from "../productData.ts";
 
 export const modeFlag = Flag.choice("mode", ServerConfig.RuntimeMode.literals).pipe(
   Flag.withDescription("Runtime mode. `desktop` keeps loopback defaults unless overridden."),
@@ -130,6 +131,13 @@ const EnvServerConfig = Config.all({
   logWebSocketEvents: Config.boolean("T3CODE_LOG_WS_EVENTS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
+  ),
+  logProviderEvents: Config.boolean("T3CODE_LOG_PROVIDER_EVENTS").pipe(Config.withDefault(false)),
+  dataOwnerId: Config.schema(ProductDataScopeId, "T3CODE_OWNER_ID").pipe(
+    Config.withDefault("local"),
+  ),
+  dataWorkspaceId: Config.schema(ProductDataScopeId, "T3CODE_WORKSPACE_ID").pipe(
+    Config.withDefault("default"),
   ),
   tailscaleServeEnabled: Config.boolean("T3CODE_TAILSCALE_SERVE").pipe(
     Config.option,
@@ -285,6 +293,11 @@ export const resolveServerConfig = (
     const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, devUrl, {
       baseDirIsExplicit: Option.isSome(explicitBaseDir),
     });
+    yield* ensureProductDataScope({
+      filePath: derivedPaths.dataScopePath,
+      ownerId: env.dataOwnerId,
+      workspaceId: env.dataWorkspaceId,
+    });
     yield* ServerConfig.ensureServerDirectories(derivedPaths);
     const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(
       derivedPaths.settingsPath,
@@ -378,6 +391,9 @@ export const resolveServerConfig = (
       desktopBootstrapToken,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
+      logProviderEvents: env.logProviderEvents,
+      dataOwnerId: env.dataOwnerId,
+      dataWorkspaceId: env.dataWorkspaceId,
       tailscaleServeEnabled,
       tailscaleServePort,
     };

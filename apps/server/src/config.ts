@@ -14,6 +14,8 @@ import * as LogLevel from "effect/LogLevel";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+import type { ProductDataScopeId } from "./productData.ts";
+
 export const DEFAULT_PORT = 3773;
 
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
@@ -28,10 +30,14 @@ export type StartupPresentation = typeof StartupPresentation.Type;
 export interface ServerDerivedPaths {
   readonly stateDir: string;
   readonly dbPath: string;
+  readonly dataScopePath: string;
   readonly keybindingsConfigPath: string;
   readonly settingsPath: string;
   readonly providerStatusCacheDir: string;
   readonly worktreesDir: string;
+  readonly runtimeHomesDir: string;
+  readonly projectsDir: string;
+  readonly backupsDir: string;
   readonly attachmentsDir: string;
   readonly logsDir: string;
   readonly serverLogPath: string;
@@ -78,6 +84,9 @@ export class ServerConfig extends Context.Service<
     readonly desktopBootstrapToken: string | undefined;
     readonly autoBootstrapProjectFromCwd: boolean;
     readonly logWebSocketEvents: boolean;
+    readonly logProviderEvents: boolean;
+    readonly dataOwnerId: ProductDataScopeId;
+    readonly dataWorkspaceId: ProductDataScopeId;
     readonly tailscaleServeEnabled: boolean;
     readonly tailscaleServePort: number;
   }
@@ -111,10 +120,14 @@ export const deriveServerPaths = Effect.fn(function* (
   return {
     stateDir,
     dbPath,
+    dataScopePath: join(baseDir, "data-scope.json"),
     keybindingsConfigPath: join(stateDir, "keybindings.json"),
     settingsPath: join(stateDir, "settings.json"),
     providerStatusCacheDir,
     worktreesDir: join(baseDir, "worktrees"),
+    runtimeHomesDir: join(baseDir, "runtime-homes"),
+    projectsDir: join(baseDir, "projects"),
+    backupsDir: join(baseDir, "backups"),
     attachmentsDir,
     logsDir,
     serverLogPath: join(logsDir, "server.log"),
@@ -141,6 +154,9 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(derivedPaths.terminalLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.worktreesDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.runtimeHomesDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.projectsDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.backupsDir, { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.keybindingsConfigPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true }),
       fs.makeDirectory(derivedPaths.providerStatusCacheDir, { recursive: true }),
@@ -181,6 +197,9 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     mode: "web",
     autoBootstrapProjectFromCwd: false,
     logWebSocketEvents: false,
+    logProviderEvents: false,
+    dataOwnerId: "local",
+    dataWorkspaceId: "default",
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
     port: 0,

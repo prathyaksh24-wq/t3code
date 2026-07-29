@@ -47,7 +47,10 @@ If OTLP is not configured, metrics still exist in-process, but you will not have
 
 ### Related Artifacts
 
-Provider event NDJSON files still exist for provider runtime streams. Those are separate from the main server trace file.
+Provider event NDJSON files are available for provider runtime streams, but are disabled by
+default because they can contain conversation and tool content. Set
+`T3CODE_LOG_PROVIDER_EVENTS=true` for a deliberate diagnostic session. These files are separate
+from the main server trace file and should be handled as sensitive data.
 
 ## Run The Server In Instrumented Mode
 
