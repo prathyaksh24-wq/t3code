@@ -693,9 +693,13 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
-  const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
+  const providerCommandMetadata = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
-      Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
+      Effect.map((uuid) => ({
+        commandId: CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`),
+        ...(event.runId !== undefined ? { runId: event.runId } : {}),
+        ...(event.traceId !== undefined ? { traceId: event.traceId } : {}),
+      })),
     );
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
@@ -954,7 +958,7 @@ const make = Effect.gen(function* () {
 
       yield* orchestrationEngine.dispatch({
         type: "thread.message.assistant.delta",
-        commandId: yield* providerCommandId(input.event, input.commandTag),
+        ...(yield* providerCommandMetadata(input.event, input.commandTag)),
         threadId: input.threadId,
         messageId: input.messageId,
         delta: bufferedText,
@@ -1021,7 +1025,7 @@ const make = Effect.gen(function* () {
       if (hasRenderableText) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.delta",
-          commandId: yield* providerCommandId(input.event, input.finalDeltaCommandTag),
+          ...(yield* providerCommandMetadata(input.event, input.finalDeltaCommandTag)),
           threadId: input.threadId,
           messageId: input.messageId,
           delta: text,
@@ -1033,7 +1037,7 @@ const make = Effect.gen(function* () {
       if (input.hasProjectedMessage || hasRenderableText) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.complete",
-          commandId: yield* providerCommandId(input.event, input.commandTag),
+          ...(yield* providerCommandMetadata(input.event, input.commandTag)),
           threadId: input.threadId,
           messageId: input.messageId,
           ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -1109,7 +1113,7 @@ const make = Effect.gen(function* () {
       const existingPlan = findProposedPlanById(input.threadProposedPlans, input.planId);
       yield* orchestrationEngine.dispatch({
         type: "thread.proposed-plan.upsert",
-        commandId: yield* providerCommandId(input.event, "proposed-plan-upsert"),
+        ...(yield* providerCommandMetadata(input.event, "proposed-plan-upsert")),
         threadId: input.threadId,
         proposedPlan: {
           id: input.planId,
@@ -1292,6 +1296,13 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      yield* Effect.annotateCurrentSpan({
+        "provider.event_type": event.type,
+        "provider.thread_id": event.threadId,
+        ...(event.turnId ? { "provider.turn_id": event.turnId } : {}),
+        ...(event.runId ? { "runtime.run_id": event.runId } : {}),
+        ...(event.traceId ? { "runtime.trace_id": event.traceId } : {}),
+      });
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 
@@ -1343,6 +1354,7 @@ const make = Effect.gen(function* () {
           case "turn.started":
             return !conflictsWithActiveTurn || conflictingTurnStartIsPendingTurnStart;
           case "turn.completed":
+          case "turn.aborted":
             if (conflictsWithActiveTurn || missingTurnForActiveTurn) {
               return false;
             }
@@ -1367,7 +1379,8 @@ const make = Effect.gen(function* () {
         event.type === "session.exited" ||
         event.type === "thread.started" ||
         event.type === "turn.started" ||
-        event.type === "turn.completed"
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted"
       ) {
         const status = (() => {
           switch (event.type) {
@@ -1383,6 +1396,8 @@ const make = Effect.gen(function* () {
               return normalizeRuntimeTurnState(event.payload.state) === "failed"
                 ? "error"
                 : "ready";
+            case "turn.aborted":
+              return "ready";
             case "session.started":
             case "thread.started":
               // Provider thread/session start notifications can arrive during an
@@ -1393,7 +1408,9 @@ const make = Effect.gen(function* () {
         const nextActiveTurnId =
           event.type === "turn.started"
             ? (eventTurnId ?? null)
-            : event.type === "turn.completed" || event.type === "session.exited"
+            : event.type === "turn.completed" ||
+                event.type === "turn.aborted" ||
+                event.type === "session.exited"
               ? null
               : event.type === "session.state.changed" &&
                   !sessionStatusAllowsActiveTurn(
@@ -1434,7 +1451,7 @@ const make = Effect.gen(function* () {
 
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
-            commandId: yield* providerCommandId(event, "thread-session-set"),
+            ...(yield* providerCommandMetadata(event, "thread-session-set")),
             threadId: thread.id,
             session: {
               threadId: thread.id,
@@ -1480,7 +1497,7 @@ const make = Effect.gen(function* () {
           if (spillChunk.length > 0) {
             yield* orchestrationEngine.dispatch({
               type: "thread.message.assistant.delta",
-              commandId: yield* providerCommandId(event, "assistant-delta-buffer-spill"),
+              ...(yield* providerCommandMetadata(event, "assistant-delta-buffer-spill")),
               threadId: thread.id,
               messageId: assistantMessageId,
               delta: spillChunk,
@@ -1491,7 +1508,7 @@ const make = Effect.gen(function* () {
         } else {
           yield* orchestrationEngine.dispatch({
             type: "thread.message.assistant.delta",
-            commandId: yield* providerCommandId(event, "assistant-delta"),
+            ...(yield* providerCommandMetadata(event, "assistant-delta")),
             threadId: thread.id,
             messageId: assistantMessageId,
             delta: assistantDelta,
@@ -1634,7 +1651,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (event.type === "turn.completed") {
+      if (event.type === "turn.completed" || event.type === "turn.aborted") {
         const detailedThread = yield* getLoadedThreadDetail();
         const messages = detailedThread?.messages ?? [];
         const proposedPlans = detailedThread?.proposedPlans ?? [];
@@ -1684,7 +1701,7 @@ const make = Effect.gen(function* () {
         if (shouldApplyRuntimeError) {
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
-            commandId: yield* providerCommandId(event, "runtime-error-session-set"),
+            ...(yield* providerCommandMetadata(event, "runtime-error-session-set")),
             threadId: thread.id,
             session: {
               threadId: thread.id,
@@ -1706,7 +1723,7 @@ const make = Effect.gen(function* () {
       if (event.type === "thread.metadata.updated" && event.payload.name) {
         yield* orchestrationEngine.dispatch({
           type: "thread.meta.update",
-          commandId: yield* providerCommandId(event, "thread-meta-update"),
+          ...(yield* providerCommandMetadata(event, "thread-meta-update")),
           threadId: thread.id,
           title: event.payload.name,
         });
@@ -1734,7 +1751,7 @@ const make = Effect.gen(function* () {
             );
             yield* orchestrationEngine.dispatch({
               type: "thread.turn.diff.complete",
-              commandId: yield* providerCommandId(event, "thread-turn-diff-complete"),
+              ...(yield* providerCommandMetadata(event, "thread-turn-diff-complete")),
               threadId: thread.id,
               turnId,
               completedAt: now,
@@ -1766,11 +1783,11 @@ const make = Effect.gen(function* () {
 
       const activities = runtimeEventToActivities(event, taskTitle);
       yield* Effect.forEach(activities, (activity) =>
-        providerCommandId(event, "thread-activity-append").pipe(
-          Effect.flatMap((commandId) =>
+        providerCommandMetadata(event, "thread-activity-append").pipe(
+          Effect.flatMap((commandMetadata) =>
             orchestrationEngine.dispatch({
               type: "thread.activity.append",
-              commandId,
+              ...commandMetadata,
               threadId: thread.id,
               activity,
               createdAt: activity.createdAt,

@@ -10,6 +10,8 @@ import {
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
+  type RunId,
+  type TraceId,
   type TurnId,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
@@ -230,6 +232,8 @@ const make = Effect.gen(function* () {
     readonly turnId: TurnId | null;
     readonly createdAt: string;
     readonly requestId?: string;
+    readonly runId?: RunId;
+    readonly traceId?: TraceId;
   }) =>
     Effect.all({
       commandId: serverCommandId("provider-failure-activity"),
@@ -253,6 +257,8 @@ const make = Effect.gen(function* () {
             createdAt: input.createdAt,
           },
           createdAt: input.createdAt,
+          ...(input.runId !== undefined ? { runId: input.runId } : {}),
+          ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
         }),
       ),
     );
@@ -272,6 +278,8 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly session: OrchestrationSession;
     readonly createdAt: string;
+    readonly runId?: RunId;
+    readonly traceId?: TraceId;
   }) =>
     serverCommandId("provider-session-set").pipe(
       Effect.flatMap((commandId) =>
@@ -281,6 +289,8 @@ const make = Effect.gen(function* () {
           threadId: input.threadId,
           session: input.session,
           createdAt: input.createdAt,
+          ...(input.runId !== undefined ? { runId: input.runId } : {}),
+          ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
         }),
       ),
     );
@@ -289,6 +299,8 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly detail: string;
     readonly createdAt: string;
+    readonly runId?: RunId;
+    readonly traceId?: TraceId;
   }) {
     const thread = yield* resolveThread(input.threadId);
     if (!thread) {
@@ -310,6 +322,8 @@ const make = Effect.gen(function* () {
         updatedAt: input.createdAt,
       },
       createdAt: input.createdAt,
+      ...(input.runId !== undefined ? { runId: input.runId } : {}),
+      ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
     });
   });
 
@@ -363,6 +377,8 @@ const make = Effect.gen(function* () {
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
+      readonly runId?: RunId;
+      readonly traceId?: TraceId;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -451,6 +467,8 @@ const make = Effect.gen(function* () {
           updatedAt: createdAt,
         },
         createdAt,
+        ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+        ...(options?.traceId !== undefined ? { traceId: options.traceId } : {}),
       });
     }
     if (thread.session !== null) {
@@ -536,6 +554,8 @@ const make = Effect.gen(function* () {
             updatedAt: session.updatedAt,
           },
           createdAt,
+          ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+          ...(options?.traceId !== undefined ? { traceId: options.traceId } : {}),
         });
       });
 
@@ -618,6 +638,8 @@ const make = Effect.gen(function* () {
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
     readonly createdAt: string;
+    readonly runId?: RunId;
+    readonly traceId?: TraceId;
   }) {
     const thread = yield* resolveThread(input.threadId);
     if (!thread) {
@@ -628,6 +650,8 @@ const make = Effect.gen(function* () {
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
+      ...(input.runId !== undefined ? { runId: input.runId } : {}),
+      ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
     });
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
@@ -664,6 +688,8 @@ const make = Effect.gen(function* () {
 
     return {
       threadId: input.threadId,
+      ...(input.runId !== undefined ? { runId: input.runId } : {}),
+      ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
       ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
@@ -843,6 +869,8 @@ const make = Effect.gen(function* () {
         threadId: event.payload.threadId,
         detail,
         createdAt: event.payload.createdAt,
+        ...(event.metadata.runId !== undefined ? { runId: event.metadata.runId } : {}),
+        ...(event.metadata.traceId !== undefined ? { traceId: event.metadata.traceId } : {}),
       }).pipe(
         Effect.flatMap(() =>
           appendProviderFailureActivity({
@@ -852,6 +880,8 @@ const make = Effect.gen(function* () {
             detail,
             turnId: null,
             createdAt: event.payload.createdAt,
+            ...(event.metadata.runId !== undefined ? { runId: event.metadata.runId } : {}),
+            ...(event.metadata.traceId !== undefined ? { traceId: event.metadata.traceId } : {}),
           }),
         ),
         Effect.asVoid,
@@ -879,6 +909,8 @@ const make = Effect.gen(function* () {
         : {}),
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,
+      ...(event.metadata.runId !== undefined ? { runId: event.metadata.runId } : {}),
+      ...(event.metadata.traceId !== undefined ? { traceId: event.metadata.traceId } : {}),
     }).pipe(
       Effect.map(Option.some),
       Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
@@ -1042,6 +1074,8 @@ const make = Effect.gen(function* () {
       "orchestration.event_type": event.type,
       "orchestration.thread_id": event.payload.threadId,
       ...(event.commandId ? { "orchestration.command_id": event.commandId } : {}),
+      ...(event.metadata.runId ? { "runtime.run_id": event.metadata.runId } : {}),
+      ...(event.metadata.traceId ? { "runtime.trace_id": event.metadata.traceId } : {}),
     });
     yield* increment(orchestrationEventsProcessedTotal, {
       eventType: event.type,

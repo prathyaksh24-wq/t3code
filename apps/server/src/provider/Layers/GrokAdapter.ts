@@ -1446,7 +1446,17 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: {
+        sessionModelSwitch: "in-session",
+        runtime: {
+          sessionResume: { support: "supported" },
+          turnCancellation: { support: "supported" },
+          conversationRollback: {
+            support: "unsupported",
+            reason: "Grok ACP does not expose provider-side conversation rollback.",
+          },
+        },
+      },
       startSession,
       sendTurn,
       interruptTurn,

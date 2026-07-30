@@ -16,7 +16,16 @@ import {
   ThreadId,
   ModelSelection,
   ProviderInstanceId,
+  OrchestrationThreadStreamItem,
+  type RunId,
+  type TraceId,
 } from "@t3tools/contracts";
+import {
+  LIVE_RUNTIME_CANCELLATION_FIXTURE,
+  LIVE_RUNTIME_ERROR_FIXTURE,
+  LIVE_RUNTIME_FIXTURE_IDS,
+  LIVE_RUNTIME_SUCCESS_FIXTURE,
+} from "@t3tools/contracts/testing/live-runtime";
 import { assert, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -161,6 +170,8 @@ const startTurn = (input: {
   readonly text: string;
   readonly modelSelection?: ModelSelection;
   readonly createdAt?: string;
+  readonly runId?: RunId;
+  readonly traceId?: TraceId;
 }) =>
   input.harness.engine.dispatch({
     type: "thread.turn.start",
@@ -180,7 +191,125 @@ const startTurn = (input: {
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     runtimeMode: "approval-required",
     createdAt: input.createdAt ?? nowIso(),
+    ...(input.runId !== undefined ? { runId: input.runId } : {}),
+    ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
   });
+
+it.live("keeps deterministic runtime events correlated across the browser wire contract", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession({
+        events: LIVE_RUNTIME_SUCCESS_FIXTURE,
+      });
+
+      yield* startTurn({
+        harness,
+        commandId: "cmd-turn-start-correlated",
+        messageId: "msg-user-correlated",
+        text: "Update the README",
+        runId: LIVE_RUNTIME_FIXTURE_IDS.runId,
+        traceId: LIVE_RUNTIME_FIXTURE_IDS.traceId,
+      });
+
+      yield* harness.waitForReceipt(
+        (receipt): receipt is TurnProcessingQuiescedReceipt =>
+          receipt.type === "turn.processing.quiesced" &&
+          receipt.threadId === THREAD_ID &&
+          receipt.checkpointTurnCount === 1,
+      );
+
+      const events = yield* harness.waitForDomainEvent(
+        (event) =>
+          event.type === "thread.turn-diff-completed" &&
+          event.metadata.runId === LIVE_RUNTIME_FIXTURE_IDS.runId,
+      );
+      const correlated = events.filter(
+        (event) => event.metadata.runId === LIVE_RUNTIME_FIXTURE_IDS.runId,
+      );
+      const eventTypes = new Set(correlated.map((event) => event.type));
+
+      assert.equal(
+        eventTypes.has("thread.turn-start-requested"),
+        true,
+        "turn start should keep the browser run id",
+      );
+      assert.equal(
+        eventTypes.has("thread.session-set"),
+        true,
+        "session state should keep the browser run id",
+      );
+      assert.equal(
+        eventTypes.has("thread.activity-appended"),
+        true,
+        "provider activity should keep the browser run id",
+      );
+      assert.equal(
+        eventTypes.has("thread.turn-diff-completed"),
+        true,
+        "checkpoint projection should keep the browser run id",
+      );
+
+      for (const event of correlated) {
+        assert.equal(event.metadata.traceId, LIVE_RUNTIME_FIXTURE_IDS.traceId);
+        yield* Schema.decodeUnknownEffect(OrchestrationThreadStreamItem)({
+          kind: "event",
+          event,
+        });
+      }
+    }),
+  ),
+);
+
+it.live("settles a cancelled runtime fixture without leaving a running session", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession({
+        events: LIVE_RUNTIME_CANCELLATION_FIXTURE,
+      });
+
+      yield* startTurn({
+        harness,
+        commandId: "cmd-turn-start-cancelled",
+        messageId: "msg-user-cancelled",
+        text: "Cancel this turn",
+        runId: LIVE_RUNTIME_FIXTURE_IDS.runId,
+        traceId: LIVE_RUNTIME_FIXTURE_IDS.traceId,
+      });
+
+      const thread = yield* harness.waitForThread(
+        THREAD_ID,
+        (entry) => entry.session?.status === "ready" && entry.session.activeTurnId === null,
+      );
+      assert.equal(thread.session?.activeTurnId, null);
+
+      const events = yield* harness.waitForDomainEvent(
+        (event) =>
+          event.type === "thread.session-set" &&
+          event.payload.session.status === "ready" &&
+          event.metadata.runId === LIVE_RUNTIME_FIXTURE_IDS.runId,
+      );
+      const correlated = events.filter(
+        (event) => event.metadata.runId === LIVE_RUNTIME_FIXTURE_IDS.runId,
+      );
+      assert.equal(
+        correlated.some(
+          (event) =>
+            event.type === "thread.session-set" && event.payload.session.status === "ready",
+        ),
+        true,
+      );
+      for (const event of correlated) {
+        assert.equal(event.metadata.traceId, LIVE_RUNTIME_FIXTURE_IDS.traceId);
+        yield* Schema.decodeUnknownEffect(OrchestrationThreadStreamItem)({
+          kind: "event",
+          event,
+        });
+      }
+    }),
+  ),
+);
 
 it.live("runs a single turn end-to-end and persists checkpoint state in sqlite + git", () =>
   withHarness((harness) =>
@@ -359,6 +488,7 @@ it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
         assert.equal(secondThread.session?.threadId, "thread-1");
       }),
     ),
+  360_000,
 );
 
 it.live("runs multi-turn file edits and persists checkpoint diffs", () =>
@@ -631,43 +761,7 @@ it.live("records failed turn runtime state and checkpoint status as error", () =
       yield* seedProjectAndThread(harness);
 
       yield* harness.adapterHarness!.queueTurnResponseForNextSession({
-        events: [
-          {
-            type: "turn.started",
-            ...runtimeBase("evt-failure-1", "2026-02-24T10:04:00.000Z"),
-            threadId: THREAD_ID,
-            turnId: FIXTURE_TURN_ID,
-          },
-          {
-            type: "content.delta",
-            ...runtimeBase("evt-failure-2", "2026-02-24T10:04:00.100Z"),
-            threadId: THREAD_ID,
-            turnId: FIXTURE_TURN_ID,
-            payload: {
-              streamKind: "assistant_text",
-              delta: "Partial output before failure.\n",
-            },
-          },
-          {
-            type: "runtime.error",
-            ...runtimeBase("evt-failure-3", "2026-02-24T10:04:00.200Z"),
-            threadId: THREAD_ID,
-            turnId: FIXTURE_TURN_ID,
-            payload: {
-              message: "Sandbox command failed.",
-            },
-          },
-          {
-            type: "turn.completed",
-            ...runtimeBase("evt-failure-4", "2026-02-24T10:04:00.300Z"),
-            threadId: THREAD_ID,
-            turnId: FIXTURE_TURN_ID,
-            payload: {
-              state: "failed",
-              errorMessage: "Sandbox command failed.",
-            },
-          },
-        ],
+        events: LIVE_RUNTIME_ERROR_FIXTURE,
       });
 
       yield* startTurn({
@@ -675,13 +769,15 @@ it.live("records failed turn runtime state and checkpoint status as error", () =
         commandId: "cmd-turn-start-failure",
         messageId: "msg-user-failure",
         text: "Run risky command",
+        runId: LIVE_RUNTIME_FIXTURE_IDS.runId,
+        traceId: LIVE_RUNTIME_FIXTURE_IDS.traceId,
       });
 
       const thread = yield* harness.waitForThread(
         THREAD_ID,
         (entry) =>
           entry.session?.status === "error" &&
-          entry.session?.lastError === "Sandbox command failed." &&
+          entry.session?.lastError === "Fixture runtime failed" &&
           entry.activities.some((activity) => activity.kind === "runtime.error") &&
           entry.checkpoints.length === 1,
       );

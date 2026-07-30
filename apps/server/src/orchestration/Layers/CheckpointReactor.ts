@@ -5,6 +5,8 @@ import {
   MessageId,
   type ProjectId,
   ThreadId,
+  type RunId,
+  type TraceId,
   TurnId,
   type OrchestrationEvent,
   type ProviderRuntimeEvent,
@@ -230,6 +232,8 @@ const make = Effect.gen(function* () {
     readonly status: "ready" | "missing" | "error";
     readonly assistantMessageId: MessageId | undefined;
     readonly createdAt: string;
+    readonly runId?: RunId;
+    readonly traceId?: TraceId;
   }) {
     const fromTurnCount = Math.max(0, input.turnCount - 1);
     const fromCheckpointRef = checkpointRefForThreadTurn(input.threadId, fromTurnCount);
@@ -301,6 +305,8 @@ const make = Effect.gen(function* () {
     yield* orchestrationEngine.dispatch({
       type: "thread.turn.diff.complete",
       commandId: yield* serverCommandId("checkpoint-turn-diff-complete"),
+      ...(input.runId !== undefined ? { runId: input.runId } : {}),
+      ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
       threadId: input.threadId,
       turnId: input.turnId,
       completedAt: input.createdAt,
@@ -331,6 +337,8 @@ const make = Effect.gen(function* () {
     yield* orchestrationEngine.dispatch({
       type: "thread.activity.append",
       commandId: yield* serverCommandId("checkpoint-captured-activity"),
+      ...(input.runId !== undefined ? { runId: input.runId } : {}),
+      ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
       threadId: input.threadId,
       activity: {
         id: EventId.make(yield* randomUUID),
@@ -410,6 +418,8 @@ const make = Effect.gen(function* () {
         status: checkpointStatusFromRuntime(event.payload.state),
         assistantMessageId: undefined,
         createdAt: event.createdAt,
+        ...(event.runId !== undefined ? { runId: event.runId } : {}),
+        ...(event.traceId !== undefined ? { traceId: event.traceId } : {}),
       });
     },
   );
@@ -473,6 +483,8 @@ const make = Effect.gen(function* () {
       status: "ready",
       assistantMessageId: event.payload.assistantMessageId ?? undefined,
       createdAt: event.payload.completedAt,
+      ...(event.metadata.runId !== undefined ? { runId: event.metadata.runId } : {}),
+      ...(event.metadata.traceId !== undefined ? { traceId: event.metadata.traceId } : {}),
     });
   });
 

@@ -1,6 +1,8 @@
 import {
   CommandId,
   ORCHESTRATION_WS_METHODS,
+  RunId,
+  TraceId,
   type ClientOrchestrationCommand,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -238,6 +240,8 @@ export const startThreadTurn: (input: StartThreadTurnInput) => CommandEffect = E
     ...input,
     type: "thread.turn.start",
     commandId: metadata.commandId,
+    runId: input.runId ?? RunId.make(`run:${metadata.commandId}`),
+    traceId: input.traceId ?? TraceId.make(`trace:${metadata.commandId}`),
     createdAt: metadata.createdAt,
   });
 });

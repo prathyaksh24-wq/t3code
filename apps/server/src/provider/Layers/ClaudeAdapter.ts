@@ -3929,6 +3929,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      runtime: {
+        sessionResume: { support: "supported" },
+        turnCancellation: { support: "supported" },
+        conversationRollback: { support: "supported" },
+      },
     },
     startSession,
     sendTurn,

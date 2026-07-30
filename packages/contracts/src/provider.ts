@@ -5,7 +5,9 @@ import {
   EventId,
   IsoDateTime,
   ProviderItemId,
+  RunId,
   ThreadId,
+  TraceId,
   TurnId,
 } from "./baseSchemas.ts";
 import {
@@ -66,6 +68,8 @@ export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   input: Schema.optional(
     TrimmedNonEmptyString.check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_INPUT_CHARS)),
   ),
@@ -76,6 +80,24 @@ export const ProviderSendTurnInput = Schema.Struct({
   interactionMode: Schema.optional(ProviderInteractionMode),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
+
+export const ProviderRuntimeCapability = Schema.Union([
+  Schema.Struct({
+    support: Schema.Literal("supported"),
+  }),
+  Schema.Struct({
+    support: Schema.Literal("unsupported"),
+    reason: TrimmedNonEmptyString,
+  }),
+]);
+export type ProviderRuntimeCapability = typeof ProviderRuntimeCapability.Type;
+
+export const ProviderRuntimeCapabilities = Schema.Struct({
+  sessionResume: ProviderRuntimeCapability,
+  turnCancellation: ProviderRuntimeCapability,
+  conversationRollback: ProviderRuntimeCapability,
+});
+export type ProviderRuntimeCapabilities = typeof ProviderRuntimeCapabilities.Type;
 
 export const ProviderTurnStartResult = Schema.Struct({
   threadId: ThreadId,

@@ -71,4 +71,44 @@ describe("ServerProvider", () => {
 
     expect(parsed.continuation?.groupKey).toBe("codex:home:/Users/julius/.codex");
   });
+
+  it("requires unsupported runtime capabilities to explain why", () => {
+    const provider = {
+      instanceId: "grok",
+      driver: "grok",
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: {
+        status: "authenticated",
+      },
+      checkedAt: "2026-04-10T00:00:00.000Z",
+      models: [],
+      runtimeCapabilities: {
+        sessionResume: { support: "supported" },
+        turnCancellation: { support: "supported" },
+        conversationRollback: {
+          support: "unsupported",
+          reason: "Grok ACP does not expose provider-side conversation rollback.",
+        },
+      },
+    };
+
+    expect(decodeServerProvider(provider).runtimeCapabilities?.conversationRollback).toEqual(
+      provider.runtimeCapabilities.conversationRollback,
+    );
+    expect(() =>
+      decodeServerProvider({
+        ...provider,
+        runtimeCapabilities: {
+          ...provider.runtimeCapabilities,
+          conversationRollback: {
+            support: "unsupported",
+            reason: " ",
+          },
+        },
+      }),
+    ).toThrow();
+  });
 });

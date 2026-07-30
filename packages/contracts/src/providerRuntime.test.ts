@@ -2,10 +2,25 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import { ProviderRuntimeEvent } from "./providerRuntime.ts";
+import {
+  LIVE_RUNTIME_CANCELLATION_FIXTURE,
+  LIVE_RUNTIME_ERROR_FIXTURE,
+  LIVE_RUNTIME_SUCCESS_FIXTURE,
+} from "../testing/liveRuntime.ts";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
 describe("ProviderRuntimeEvent", () => {
+  it("keeps deterministic runtime fixtures aligned with the provider event contract", () => {
+    for (const event of [
+      ...LIVE_RUNTIME_SUCCESS_FIXTURE,
+      ...LIVE_RUNTIME_CANCELLATION_FIXTURE,
+      ...LIVE_RUNTIME_ERROR_FIXTURE,
+    ]) {
+      expect(decodeRuntimeEvent(event)).toEqual(event);
+    }
+  });
+
   it("accepts fork-provided driver kinds as branded slugs", () => {
     const parsed = decodeRuntimeEvent({
       type: "session.started",

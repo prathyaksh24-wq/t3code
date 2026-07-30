@@ -181,7 +181,12 @@ const correlateSnapshotWithSource = (
       ),
     );
   }
-  return Effect.succeed(snapshot);
+  return Effect.succeed({
+    ...snapshot,
+    ...(source.runtimeCapabilities !== undefined
+      ? { runtimeCapabilities: source.runtimeCapabilities }
+      : {}),
+  });
 };
 
 /**
@@ -201,6 +206,9 @@ const snapshotInstanceKey = (provider: ServerProvider): ProviderInstanceId => {
 const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => ({
   instanceId: instance.instanceId,
   driverKind: instance.driverKind,
+  ...(instance.adapter.capabilities?.runtime !== undefined
+    ? { runtimeCapabilities: instance.adapter.capabilities.runtime }
+    : {}),
   getSnapshot: instance.snapshot.getSnapshot,
   refresh: instance.snapshot.refresh,
   streamChanges: instance.snapshot.streamChanges,
