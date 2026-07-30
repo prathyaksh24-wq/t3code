@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 
 import { assert, expect, it } from "@effect/vitest";
@@ -49,6 +51,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     otlpExportIntervalMs: 10_000,
     otlpServiceName: "t3-server",
     devAllowedOrigins: [],
+    logProviderEvents: false,
+    dataOwnerId: "local",
+    dataWorkspaceId: "default",
   } as const;
 
   const openBootstrapFd = Effect.fn(function* (payload: DesktopBackendBootstrapValue) {
@@ -56,8 +61,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-", suffix: ".ndjson" });
     const encoded = yield* encodeDesktopBootstrap(payload);
     yield* fs.writeFileString(filePath, `${encoded}\n`);
-    const { fd } = yield* fs.open(filePath, { flag: "r" });
-    return fd;
+    return yield* Effect.sync(() => NodeFS.openSync(filePath, "r"));
   });
 
   it.effect("falls back to effect/config values when flags are omitted", () =>
@@ -101,6 +105,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_NO_BROWSER: "true",
                   T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
                   T3CODE_LOG_WS_EVENTS: "true",
+                  T3CODE_LOG_PROVIDER_EVENTS: "true",
+                  T3CODE_OWNER_ID: "prathyaksh",
+                  T3CODE_WORKSPACE_ID: "beta",
                 },
               }),
             ),
@@ -126,6 +133,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         desktopBootstrapToken: undefined,
         autoBootstrapProjectFromCwd: false,
         logWebSocketEvents: true,
+        logProviderEvents: true,
+        dataOwnerId: "prathyaksh",
+        dataWorkspaceId: "beta",
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
       });
@@ -277,13 +287,14 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
   it.effect("uses bootstrap envelope values as fallbacks when flags and env are absent", () =>
     Effect.gen(function* () {
-      const { join } = yield* Path.Path;
-      const baseDir = "/tmp/t3-bootstrap-home";
+      const path = yield* Path.Path;
+      const requestedBaseDir = "/tmp/t3-bootstrap-home";
+      const baseDir = path.resolve(requestedBaseDir);
       const fd = yield* openBootstrapFd(
         makeDesktopBootstrap({
           port: 4888,
           host: "127.0.0.2",
-          t3Home: baseDir,
+          t3Home: requestedBaseDir,
           noBrowser: true,
           desktopBootstrapToken: "desktop-token",
           tailscaleServeEnabled: false,
@@ -346,7 +357,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
       });
-      assert.equal(join(baseDir, "userdata"), resolved.stateDir);
+      assert.equal(path.join(baseDir, "userdata"), resolved.stateDir);
     }),
   );
 
@@ -390,12 +401,67 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         resolved.terminalLogsDir,
         resolved.attachmentsDir,
         resolved.worktreesDir,
+        resolved.runtimeHomesDir,
+        resolved.projectsDir,
+        resolved.backupsDir,
         path.dirname(resolved.serverLogPath),
         path.dirname(resolved.serverTracePath),
       ]) {
         expect(yield* fs.exists(directory)).toBe(true);
       }
+      expect(yield* fs.exists(resolved.dataScopePath)).toBe(true);
       expect(resolved.cwd).toBe(path.resolve(customCwd));
+    }),
+  );
+
+  it.effect("adds product data ownership without moving inherited state", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-upgrade-" });
+      const inheritedStateDir = path.join(baseDir, "userdata");
+      const inheritedDbPath = path.join(inheritedStateDir, "state.sqlite");
+      yield* fs.makeDirectory(inheritedStateDir, { recursive: true });
+      yield* fs.writeFileString(inheritedDbPath, "inherited-state");
+
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.some("desktop"),
+          port: Option.some(4888),
+          host: Option.none(),
+          baseDir: Option.some(baseDir),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.none(),
+          tailscaleServePort: Option.none(),
+        },
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env: {
+                  T3CODE_OWNER_ID: "owner-one",
+                  T3CODE_WORKSPACE_ID: "workspace-one",
+                },
+              }),
+            ),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      expect(resolved.dbPath).toBe(inheritedDbPath);
+      expect(yield* fs.readFileString(inheritedDbPath)).toBe("inherited-state");
+      expect(yield* fs.exists(resolved.dataScopePath)).toBe(true);
+      expect(yield* fs.exists(resolved.runtimeHomesDir)).toBe(true);
+      expect(yield* fs.exists(resolved.projectsDir)).toBe(true);
+      expect(yield* fs.exists(resolved.backupsDir)).toBe(true);
     }),
   );
 

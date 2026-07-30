@@ -5,6 +5,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 ## Table of contents
 
 - [Project and workspace](#project-and-workspace)
+- [Product data](#product-data)
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
@@ -25,6 +26,19 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 #### Worktree
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live in [GitCore.ts][3].
+
+### Product data
+
+#### Product data root
+
+The configurable base directory that owns one environment's database and managed artifacts. It is
+selected with `--base-dir` or `T3CODE_HOME`. See [product-data.md][25].
+
+#### Product data scope
+
+The owner and workspace assignment stored in the root's `data-scope.json`. The scope applies to
+everything beneath that root and is distinct from an app project or its filesystem workspace root.
+See [productData.ts][26].
 
 ### Thread timeline
 
@@ -178,3 +192,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../apps/server/src/checkpointing/Utils.ts
 [23]: ../apps/server/src/checkpointing/Diffs.ts
 [24]: ./architecture.md
+[25]: ../operations/product-data.md
+[26]: ../../apps/server/src/productData.ts
