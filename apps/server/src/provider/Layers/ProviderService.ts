@@ -19,13 +19,17 @@ import {
   ProviderSendTurnInput,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
+  RunId,
+  TraceId,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
+import * as Cache from "effect/Cache";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -185,6 +189,7 @@ const correlateRuntimeEventWithInstance = (
     readonly provider: ProviderDriverKind;
   },
   event: ProviderRuntimeEvent,
+  correlation: RuntimeCorrelation,
 ): ProviderRuntimeEvent => {
   if (event.provider !== source.provider) {
     throw new Error(
@@ -196,8 +201,21 @@ const correlateRuntimeEventWithInstance = (
       `ProviderService.streamEvents: provider instance '${source.instanceId}' emitted event for instance '${event.providerInstanceId}'.`,
     );
   }
-  return { ...event, providerInstanceId: source.instanceId };
+  return {
+    ...event,
+    providerInstanceId: source.instanceId,
+    runId: correlation.runId,
+    traceId: correlation.traceId,
+  };
 };
+
+interface RuntimeCorrelation {
+  readonly runId: RunId;
+  readonly traceId: TraceId;
+}
+
+const runtimeTurnCorrelationKey = (threadId: ThreadId, turnId: string) =>
+  `${threadId}\u0000${turnId}`;
 
 const makeProviderService = Effect.fn("makeProviderService")(function* (
   options?: ProviderServiceLiveOptions,
@@ -213,7 +231,45 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  const pendingCorrelationByThread = yield* Cache.make<ThreadId, RuntimeCorrelation>({
+    capacity: 10_000,
+    timeToLive: Duration.minutes(30),
+    lookup: () => Effect.die("runtime correlation is write-through only"),
+  });
+  const correlationByTurn = yield* Cache.make<string, RuntimeCorrelation>({
+    capacity: 50_000,
+    timeToLive: Duration.hours(2),
+    lookup: () => Effect.die("runtime correlation is write-through only"),
+  });
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+  const fallbackRuntimeCorrelation = (event: ProviderRuntimeEvent): RuntimeCorrelation => {
+    const identity = `${event.threadId}:${event.turnId ?? event.eventId}`;
+    return {
+      runId: RunId.make(`runtime:${identity}`),
+      traceId: TraceId.make(`runtime:${identity}`),
+    };
+  };
+  const resolveRuntimeCorrelation = (event: ProviderRuntimeEvent) =>
+    Effect.gen(function* () {
+      if (event.turnId !== undefined) {
+        const turnCorrelation = yield* Cache.getOption(
+          correlationByTurn,
+          runtimeTurnCorrelationKey(event.threadId, event.turnId),
+        );
+        if (Option.isSome(turnCorrelation)) {
+          return turnCorrelation.value;
+        }
+      }
+      const pendingCorrelation = yield* Cache.getOption(pendingCorrelationByThread, event.threadId);
+      if (Option.isSome(pendingCorrelation)) {
+        return pendingCorrelation.value;
+      }
+      const fallback = fallbackRuntimeCorrelation(event);
+      return {
+        runId: event.runId ?? fallback.runId,
+        traceId: event.traceId ?? fallback.traceId,
+      };
+    });
   const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     McpSessionRegistry.issueActiveMcpCredential({ threadId, providerInstanceId }).pipe(
       Effect.tap((credential) =>
@@ -288,7 +344,31 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
     event: ProviderRuntimeEvent,
   ): Effect.Effect<void> =>
-    Effect.sync(() => correlateRuntimeEventWithInstance(source, event)).pipe(
+    resolveRuntimeCorrelation(event).pipe(
+      Effect.tap((correlation) =>
+        event.turnId !== undefined
+          ? Cache.set(
+              correlationByTurn,
+              runtimeTurnCorrelationKey(event.threadId, event.turnId),
+              correlation,
+            )
+          : Effect.void,
+      ),
+      Effect.map((correlation) => correlateRuntimeEventWithInstance(source, event, correlation)),
+      Effect.tap((canonicalEvent) => {
+        if (event.type !== "turn.completed" && event.type !== "turn.aborted") {
+          return Effect.void;
+        }
+        return Cache.getOption(pendingCorrelationByThread, event.threadId).pipe(
+          Effect.flatMap((pending) =>
+            Option.isSome(pending) &&
+            pending.value.runId === canonicalEvent.runId &&
+            pending.value.traceId === canonicalEvent.traceId
+              ? Cache.invalidate(pendingCorrelationByThread, event.threadId)
+              : Effect.void,
+          ),
+        );
+      }),
       Effect.flatMap((canonicalEvent) =>
         increment(providerRuntimeEventsTotal, {
           provider: canonicalEvent.provider,
@@ -685,7 +765,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       // rather than issuing a new one: sessions that go a long time between
       // browser tool calls used to lose the toolkit outright.
       yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
-      const turn = yield* routed.adapter.sendTurn(input);
+      const correlationSeed = yield* nowIso;
+      const correlation: RuntimeCorrelation = {
+        runId: input.runId ?? RunId.make(`run:${input.threadId}:${correlationSeed}`),
+        traceId: input.traceId ?? TraceId.make(`trace:${input.threadId}:${correlationSeed}`),
+      };
+      yield* Effect.annotateCurrentSpan({
+        "runtime.run_id": correlation.runId,
+        "runtime.trace_id": correlation.traceId,
+      });
+      yield* Cache.set(pendingCorrelationByThread, input.threadId, correlation);
+      const turn = yield* routed.adapter
+        .sendTurn(input)
+        .pipe(Effect.tapError(() => Cache.invalidate(pendingCorrelationByThread, input.threadId)));
+      yield* Cache.set(
+        correlationByTurn,
+        runtimeTurnCorrelationKey(input.threadId, turn.turnId),
+        correlation,
+      );
       yield* directory.upsert({
         threadId: input.threadId,
         provider: routed.adapter.provider,

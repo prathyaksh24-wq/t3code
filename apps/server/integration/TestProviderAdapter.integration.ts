@@ -319,6 +319,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
 
         const assistantDeltas: string[] = [];
         const deferredTurnCompletedEvents: ProviderRuntimeEvent[] = [];
+        let hasTerminalEvent = false;
         for (const fixtureEvent of response.events) {
           const rawEvent: Record<string, unknown> = {
             ...(fixtureEvent as Record<string, unknown>),
@@ -345,8 +346,12 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
             }
           }
           if (runtimeEvent.type === "turn.completed") {
+            hasTerminalEvent = true;
             deferredTurnCompletedEvents.push(runtimeEvent);
             continue;
+          }
+          if (runtimeEvent.type === "turn.aborted") {
+            hasTerminalEvent = true;
           }
 
           yield* emit(runtimeEvent);
@@ -376,7 +381,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
           turns: [...state.snapshot.turns, nextTurn],
         };
 
-        if (deferredTurnCompletedEvents.length === 0) {
+        if (!hasTerminalEvent) {
           yield* emit({
             type: "turn.completed",
             eventId: EventId.make(yield* randomUUIDv4(input.threadId)),

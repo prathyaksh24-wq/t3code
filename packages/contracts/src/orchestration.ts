@@ -16,7 +16,9 @@ import {
   NonNegativeInt,
   ProjectId,
   ProviderItemId,
+  RunId,
   ThreadId,
+  TraceId,
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
@@ -667,6 +669,8 @@ export type ThreadTurnStartBootstrap = typeof ThreadTurnStartBootstrap.Type;
 export const ThreadTurnStartCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   message: Schema.Struct({
     messageId: MessageId,
@@ -688,6 +692,8 @@ export const ThreadTurnStartCommand = Schema.Struct({
 const ClientThreadTurnStartCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   message: Schema.Struct({
     messageId: MessageId,
@@ -797,6 +803,8 @@ export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 const ThreadSessionSetCommand = Schema.Struct({
   type: Schema.Literal("thread.session.set"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   session: OrchestrationSession,
   createdAt: IsoDateTime,
@@ -805,6 +813,8 @@ const ThreadSessionSetCommand = Schema.Struct({
 const ThreadMessageAssistantDeltaCommand = Schema.Struct({
   type: Schema.Literal("thread.message.assistant.delta"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   messageId: MessageId,
   delta: Schema.String,
@@ -815,6 +825,8 @@ const ThreadMessageAssistantDeltaCommand = Schema.Struct({
 const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.message.assistant.complete"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   messageId: MessageId,
   turnId: Schema.optional(TurnId),
@@ -824,6 +836,8 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
 const ThreadProposedPlanUpsertCommand = Schema.Struct({
   type: Schema.Literal("thread.proposed-plan.upsert"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   proposedPlan: OrchestrationProposedPlan,
   createdAt: IsoDateTime,
@@ -832,6 +846,8 @@ const ThreadProposedPlanUpsertCommand = Schema.Struct({
 const ThreadTurnDiffCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.diff.complete"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   turnId: TurnId,
   completedAt: IsoDateTime,
@@ -846,6 +862,8 @@ const ThreadTurnDiffCompleteCommand = Schema.Struct({
 const ThreadActivityAppendCommand = Schema.Struct({
   type: Schema.Literal("thread.activity.append"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
   createdAt: IsoDateTime,
@@ -854,6 +872,8 @@ const ThreadActivityAppendCommand = Schema.Struct({
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   threadId: ThreadId,
   turnCount: NonNegativeInt,
   createdAt: IsoDateTime,
@@ -1107,6 +1127,8 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
 });
 
 export const OrchestrationEventMetadata = Schema.Struct({
+  runId: Schema.optional(RunId),
+  traceId: Schema.optional(TraceId),
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
   adapterKey: Schema.optional(TrimmedNonEmptyString),

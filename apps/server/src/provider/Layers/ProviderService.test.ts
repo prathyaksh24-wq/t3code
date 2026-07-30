@@ -16,7 +16,9 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionStartInput,
+  RunId,
   ThreadId,
+  TraceId,
   TurnId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -1490,6 +1492,49 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
 const fanout = makeProviderServiceLayer();
 fanout.layer("ProviderServiceLive fanout", (it) => {
+  it.effect("stamps browser run and trace ids onto provider events", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-correlated");
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const receivedRef = yield* Ref.make<Array<ProviderRuntimeEvent>>([]);
+      const consumer = yield* Stream.take(provider.streamEvents, 1).pipe(
+        Stream.runForEach((event) => Ref.update(receivedRef, (current) => [...current, event])),
+        Effect.forkChild,
+      );
+      yield* advanceTestClock(50);
+
+      const turn = yield* provider.sendTurn({
+        threadId,
+        input: "Update README",
+        runId: RunId.make("run-browser-1"),
+        traceId: TraceId.make("trace-browser-1"),
+      });
+      fanout.codex.emit({
+        type: "turn.started",
+        eventId: asEventId("evt-correlated-1"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId,
+        turnId: turn.turnId,
+        runId: RunId.make("run-adapter-conflict"),
+        traceId: TraceId.make("trace-adapter-conflict"),
+        payload: {},
+      });
+
+      yield* Fiber.join(consumer);
+      const [event] = yield* Ref.get(receivedRef);
+      assert.equal(event?.runId, "run-browser-1");
+      assert.equal(event?.traceId, "trace-browser-1");
+    }),
+  );
+
   it.effect("fans out adapter turn completion events", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;

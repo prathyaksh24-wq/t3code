@@ -41,6 +41,10 @@ export const MessageId = makeEntityId("MessageId");
 export type MessageId = typeof MessageId.Type;
 export const TurnId = makeEntityId("TurnId");
 export type TurnId = typeof TurnId.Type;
+export const RunId = makeEntityId("RunId");
+export type RunId = typeof RunId.Type;
+export const TraceId = makeEntityId("TraceId");
+export type TraceId = typeof TraceId.Type;
 export const AuthSessionId = makeEntityId("AuthSessionId");
 export type AuthSessionId = typeof AuthSessionId.Type;
 

@@ -1,5 +1,7 @@
 import {
   EventId,
+  RunId,
+  TraceId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -23,6 +25,16 @@ import {
 import { projectEvent } from "./projector.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
+function runtimeCorrelationMetadata(input: {
+  readonly runId?: RunId | undefined;
+  readonly traceId?: TraceId | undefined;
+}): OrchestrationEvent["metadata"] {
+  return {
+    ...(input.runId !== undefined ? { runId: input.runId } : {}),
+    ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
+  };
+}
 
 // Session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
@@ -740,12 +752,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
+      const runtimeCorrelation = {
+        runId: command.runId ?? RunId.make(`run:${command.commandId}`),
+        traceId: command.traceId ?? TraceId.make(`trace:${command.commandId}`),
+      };
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelation,
         })),
         type: "thread.message-sent",
         payload: {
@@ -766,6 +783,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelation,
         })),
         causationEventId: userMessageEvent.eventId,
         type: "thread.turn-start-requested",
@@ -795,6 +813,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             aggregateId: command.threadId,
             occurredAt: command.createdAt,
             commandId: command.commandId,
+            metadata: runtimeCorrelation,
           })),
           type: "thread.unsettled",
           payload: {
@@ -811,6 +830,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             aggregateId: command.threadId,
             occurredAt: command.createdAt,
             commandId: command.commandId,
+            metadata: runtimeCorrelation,
           })),
           type: "thread.unsnoozed",
           payload: {
@@ -952,7 +972,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
-          metadata: {},
+          metadata: runtimeCorrelationMetadata(command),
         })),
         type: "thread.session-set",
         payload: {
@@ -980,6 +1000,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelationMetadata(command),
         })),
         type: "thread.unsettled",
         payload: {
@@ -1003,6 +1024,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelationMetadata(command),
         })),
         type: "thread.message-sent",
         payload: {
@@ -1030,6 +1052,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelationMetadata(command),
         })),
         type: "thread.message-sent",
         payload: {
@@ -1057,6 +1080,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelationMetadata(command),
         })),
         type: "thread.proposed-plan-upserted",
         payload: {
@@ -1078,6 +1102,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelationMetadata(command),
         })),
         type: "thread.turn-diff-completed",
         payload: {
@@ -1105,6 +1130,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelationMetadata(command),
         })),
         type: "thread.reverted",
         payload: {
@@ -1134,7 +1160,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
-          ...(requestId !== undefined ? { metadata: { requestId } } : {}),
+          metadata: {
+            ...runtimeCorrelationMetadata(command),
+            ...(requestId !== undefined ? { requestId } : {}),
+          },
         })),
         type: "thread.activity-appended",
         payload: {
@@ -1157,6 +1186,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
+          metadata: runtimeCorrelationMetadata(command),
         })),
         type: "thread.unsettled",
         payload: {

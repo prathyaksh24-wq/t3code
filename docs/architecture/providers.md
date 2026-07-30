@@ -13,7 +13,9 @@ Methods mirror the `NativeApi` interface defined in `@t3tools/contracts`:
 - `providers.respondToRequest`, `providers.stopSession`
 - `shell.openInEditor`, `server.getConfig`
 
-Codex is the only implemented provider. `claudeCode` is reserved in contracts/UI.
+Codex, Claude, Cursor, Grok, and OpenCode are implemented behind the shared
+provider adapter boundary. See [Live runtime contract](./live-runtime-contract.md)
+for cross-provider event identity, fixtures, and capability reporting.
 
 ## Client transport
 

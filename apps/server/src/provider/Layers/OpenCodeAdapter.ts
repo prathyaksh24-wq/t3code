@@ -1701,6 +1701,11 @@ export function makeOpenCodeAdapter(
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        runtime: {
+          sessionResume: { support: "supported" },
+          turnCancellation: { support: "supported" },
+          conversationRollback: { support: "supported" },
+        },
       },
       startSession,
       sendTurn,
