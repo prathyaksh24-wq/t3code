@@ -245,9 +245,20 @@ export const makeOrchestrationIntegrationHarness = (
           makeAdapterRegistryMock({ [adapterHarness.provider]: adapterHarness.adapter }),
         )
       : null;
-    const rootDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "t3-orchestration-integration-",
-    });
+    const rootDir = yield* Effect.acquireRelease(
+      fileSystem.makeTempDirectory({
+        prefix: "t3-orchestration-integration-",
+      }),
+      (directory) =>
+        fileSystem.remove(directory, { recursive: true, force: true }).pipe(
+          Effect.retry({
+            schedule: Schedule.spaced("100 millis"),
+            times: 50,
+            while: (error) => error.reason._tag === "Busy",
+          }),
+          Effect.orDie,
+        ),
+    );
     const workspaceDir = path.join(rootDir, "workspace");
     const { stateDir, dbPath } = yield* deriveServerPaths(rootDir, undefined).pipe(
       Effect.provideService(Path.Path, path),

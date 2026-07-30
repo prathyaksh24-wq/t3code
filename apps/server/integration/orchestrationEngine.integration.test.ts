@@ -396,6 +396,39 @@ it.live("runs a single turn end-to-end and persists checkpoint state in sqlite +
 );
 
 it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
+  "completes one Codex turn through orchestration",
+  () =>
+    withRealCodexHarness((harness) =>
+      Effect.gen(function* () {
+        yield* seedProjectAndThread(harness);
+        yield* startTurn({
+          harness,
+          commandId: "cmd-turn-start-real-codex-minimal",
+          messageId: "msg-real-codex-minimal",
+          text: "Reply with exactly ALPHA.",
+        });
+
+        const thread = yield* harness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.session?.status === "error" ||
+            (entry.session?.status === "ready" &&
+              entry.messages.some(
+                (message) => message.role === "assistant" && message.streaming === false,
+              )),
+          45_000,
+        );
+        assert.equal(
+          thread.session?.status,
+          "ready",
+          thread.session?.lastError ?? "Codex session did not become ready.",
+        );
+      }),
+    ),
+  60_000,
+);
+
+it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
   "keeps the same Codex provider thread across runtime mode switches",
   () =>
     withRealCodexHarness((harness) =>
@@ -410,7 +443,7 @@ it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
           workspaceRoot: harness.workspaceDir,
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
-            model: "gpt-5.3-codex",
+            model: DEFAULT_MODEL,
           },
           createdAt,
         });
@@ -423,7 +456,7 @@ it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
           title: "Integration Thread",
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
-            model: "gpt-5.3-codex",
+            model: DEFAULT_MODEL,
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "full-access",
@@ -450,14 +483,40 @@ it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
         const firstThread = yield* harness.waitForThread(
           THREAD_ID,
           (entry) =>
-            entry.session?.status === "ready" &&
-            entry.session.providerName === "codex" &&
-            entry.messages.some(
-              (message) => message.role === "assistant" && message.streaming === false,
-            ),
-          180_000,
+            entry.session?.status === "error" ||
+            (entry.session?.status === "ready" &&
+              entry.session.providerName === "codex" &&
+              entry.messages.some(
+                (message) => message.role === "assistant" && message.streaming === false,
+              )),
+          60_000,
         );
-        assert.equal(firstThread.session?.threadId, "thread-1");
+        assert.equal(
+          firstThread.session?.status,
+          "ready",
+          firstThread.session?.lastError ?? "First Codex turn did not become ready.",
+        );
+        const firstProviderSession = (yield* harness.providerService.listSessions()).find(
+          (session) => session.threadId === THREAD_ID,
+        );
+        assert.isDefined(firstProviderSession?.resumeCursor);
+
+        yield* harness.engine.dispatch({
+          type: "thread.runtime-mode.set",
+          commandId: CommandId.make("cmd-runtime-mode-set-real-codex"),
+          threadId: THREAD_ID,
+          runtimeMode: "approval-required",
+          createdAt: nowIso(),
+        });
+
+        yield* harness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.runtimeMode === "approval-required" &&
+            entry.session?.status === "ready" &&
+            entry.session.runtimeMode === "approval-required",
+          60_000,
+        );
 
         yield* harness.engine.dispatch({
           type: "thread.turn.start",
@@ -477,15 +536,24 @@ it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
         const secondThread = yield* harness.waitForThread(
           THREAD_ID,
           (entry) =>
-            entry.session?.status === "ready" &&
-            entry.session.providerName === "codex" &&
-            entry.session.runtimeMode === "approval-required" &&
-            entry.messages.some(
-              (message) => message.role === "assistant" && message.text.includes("BETA"),
-            ),
-          180_000,
+            entry.session?.status === "error" ||
+            (entry.session?.status === "ready" &&
+              entry.session.providerName === "codex" &&
+              entry.session.runtimeMode === "approval-required" &&
+              entry.messages.some(
+                (message) => message.role === "assistant" && message.text.includes("BETA"),
+              )),
+          60_000,
         );
-        assert.equal(secondThread.session?.threadId, "thread-1");
+        assert.equal(
+          secondThread.session?.status,
+          "ready",
+          secondThread.session?.lastError ?? "Second Codex turn did not become ready.",
+        );
+        const secondProviderSession = (yield* harness.providerService.listSessions()).find(
+          (session) => session.threadId === THREAD_ID,
+        );
+        assert.deepEqual(secondProviderSession?.resumeCursor, firstProviderSession?.resumeCursor);
       }),
     ),
   360_000,
