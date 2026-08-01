@@ -19,6 +19,10 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 
 The top-level workspace record in the app. In [the orchestration contracts][1], a project has a `workspaceRoot`, a title, and one or more threads. See [workspace-layout.md][2].
 
+#### General chats
+
+Chats that are not attached to a user-visible project. The server owns a reserved local workspace for these threads so provider CLIs still receive an isolated working directory. Moving a thread between General chats and a project preserves its conversation history while clearing provider-session, terminal, branch, worktree, and checkpoint state tied to the previous workspace.
+
 #### Workspace root
 
 The root filesystem path for a project. In [the orchestration model][1], it is the base directory for branches and optional worktrees. See [workspace-layout.md][2].

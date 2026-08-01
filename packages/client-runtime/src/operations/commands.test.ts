@@ -27,6 +27,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
   createProject,
+  moveThreadToProject,
   settleThread,
   startThreadTurn,
   stopThreadSession,
@@ -120,6 +121,28 @@ describe("environment commands", () => {
           commandId: "queued-command",
           threadId: "thread-1",
           createdAt: "2026-06-06T00:01:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches a project move with generated command metadata", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* moveThreadToProject({
+        threadId: ThreadId.make("thread-1"),
+        projectId: ProjectId.make("project-2"),
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.project.move",
+          commandId: "00000000-0000-4000-8000-000000000000",
+          threadId: "thread-1",
+          projectId: "project-2",
+          createdAt: expect.any(String),
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

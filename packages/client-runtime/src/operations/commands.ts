@@ -42,6 +42,7 @@ export type UnsettleThreadInput = CommandInput<"thread.unsettle">;
 export type SnoozeThreadInput = CommandInput<"thread.snooze">;
 export type UnsnoozeThreadInput = CommandInput<"thread.unsnooze">;
 export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
+export type MoveThreadToProjectInput = CommandInput<"thread.project.move">;
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
@@ -206,6 +207,18 @@ export const updateThreadMetadata: (input: UpdateThreadMetadataInput) => Command
     ...input,
     type: "thread.meta.update",
     commandId: yield* commandId(input),
+  });
+});
+
+export const moveThreadToProject: (input: MoveThreadToProjectInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.moveThreadToProject",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.project.move",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
   });
 });
 

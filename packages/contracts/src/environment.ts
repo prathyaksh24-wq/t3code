@@ -3,6 +3,12 @@ import * as Schema from "effect/Schema";
 
 import { EnvironmentId, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
+export const GENERAL_CHAT_PROJECT_ID = ProjectId.make("t3-general-chats");
+
+export function isGeneralChatProjectId(projectId: ProjectId): boolean {
+  return projectId === GENERAL_CHAT_PROJECT_ID;
+}
+
 export const ExecutionEnvironmentPlatformOs = Schema.Literals([
   "darwin",
   "linux",
@@ -47,6 +53,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server understands thread.snooze / thread.unsnooze commands. Same
       version-skew contract as threadSettlement. */
   threadSnooze: Schema.optionalKey(Schema.Boolean),
+  /** Server understands thread.project.move and resets provider workspace
+      state before the thread continues in its new project. */
+  threadProjectMove: Schema.optionalKey(Schema.Boolean),
   /** The update path clients should offer for this server. Absent on
       servers that must be relaunched manually (dev checkouts, Windows
       foreground runs, pre-update servers). */

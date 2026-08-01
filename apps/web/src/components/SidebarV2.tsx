@@ -12,7 +12,11 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, SidebarProjectGroupingMode } from "@t3tools/contracts";
+import {
+  isGeneralChatProjectId,
+  type ScopedThreadRef,
+  type SidebarProjectGroupingMode,
+} from "@t3tools/contracts";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -84,7 +88,6 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
-import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -1019,6 +1022,9 @@ export default function SidebarV2() {
   const { settleThread, unsettleThread, snoozeThread, unsnoozeThread, deleteThread } =
     useThreadActions();
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
+  const moveThreadToProject = useAtomCommand(threadEnvironment.moveToProject, {
     reportFailure: false,
   });
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
@@ -1994,6 +2000,15 @@ export default function SidebarV2() {
           true;
         const supportsSnooze =
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
+        const supportsProjectMove =
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadProjectMove ===
+          true;
+        const moveTargets = supportsProjectMove
+          ? projects.filter(
+              (project) =>
+                project.environmentId === thread.environmentId && project.id !== thread.projectId,
+            )
+          : [];
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         // Presets resolve at menu-open time (same as the popover).
@@ -2031,6 +2046,22 @@ export default function SidebarV2() {
                         },
                   ]
                 : []),
+              ...(moveTargets.length > 0
+                ? [
+                    {
+                      id: "move-to-project",
+                      label: "Move to project",
+                      children: moveTargets.map((project) => ({
+                        id: `move-to-project:${project.id}`,
+                        label: isGeneralChatProjectId(project.id)
+                          ? "General chats"
+                          : (projectDisplayNameByKey.get(
+                              `${project.environmentId}:${project.id}`,
+                            ) ?? project.title),
+                      })),
+                    },
+                  ]
+                : []),
               { id: "rename", label: "Rename thread" },
               { id: "mark-unread", label: "Mark unread" },
               { id: "delete", label: "Delete", destructive: true, icon: "trash" },
@@ -2044,6 +2075,49 @@ export default function SidebarV2() {
             (candidate) => `snooze:${candidate.id}` === clicked.value,
           );
           if (preset) attemptSnooze(threadRef, preset);
+          return;
+        }
+        if (clicked.value?.startsWith("move-to-project:")) {
+          const targetProjectId = clicked.value.slice("move-to-project:".length);
+          const targetProject = moveTargets.find((project) => project.id === targetProjectId);
+          if (!targetProject) return;
+          const targetTitle = isGeneralChatProjectId(targetProject.id)
+            ? "General chats"
+            : (projectDisplayNameByKey.get(`${targetProject.environmentId}:${targetProject.id}`) ??
+              targetProject.title);
+          const confirmed = await settlePromise(() =>
+            api.dialogs.confirm(
+              [
+                `Move "${thread.title}" to "${targetTitle}"?`,
+                "The conversation stays in this chat. Its provider session, terminal, branch, worktree, and code checkpoints restart in the new workspace.",
+              ].join("\n"),
+            ),
+          );
+          if (confirmed._tag === "Failure" || !confirmed.value) return;
+          const result = await moveThreadToProject({
+            environmentId: thread.environmentId,
+            input: {
+              threadId: thread.id,
+              projectId: targetProject.id,
+            },
+          });
+          if (result._tag === "Failure") {
+            if (!isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Could not move chat",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
+          toastManager.add({
+            type: "success",
+            title: `Moved to ${targetTitle}`,
+          });
           return;
         }
         switch (clicked.value) {
@@ -2125,6 +2199,9 @@ export default function SidebarV2() {
       deleteThread,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      moveThreadToProject,
+      projectDisplayNameByKey,
+      projects,
       serverConfigs,
       startThreadRename,
     ],
@@ -2206,20 +2283,10 @@ export default function SidebarV2() {
   // uses. The command palette already offers a "New thread in..." submenu
   // for multi-project setups.
   const handleNewThreadClick = useCallback(() => {
-    // One project: nothing to pick, create immediately.
-    if (projectGroups.length <= 1) {
-      if (isMobile) setOpenMobile(false);
-      void startNewThreadFromContext({
-        activeDraftThread: newThreadContext.activeDraftThread,
-        activeThread: newThreadContext.activeThread ?? undefined,
-        defaultProjectRef: newThreadContext.defaultProjectRef,
-        handleNewThread: newThreadContext.handleNewThread,
-      });
-      return;
-    }
     if (isMobile) setOpenMobile(false);
-    openCommandPalette({ open: "new-thread-in" });
-  }, [isMobile, newThreadContext, projectGroups.length, setOpenMobile]);
+    if (!newThreadContext.defaultProjectRef) return;
+    void newThreadContext.handleNewThread(newThreadContext.defaultProjectRef);
+  }, [isMobile, newThreadContext, setOpenMobile]);
 
   const commandPaletteShortcutLabel = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
   // Same resolution as v1: prefer the local-thread binding, fall back to

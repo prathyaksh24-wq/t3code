@@ -245,6 +245,20 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
       `,
   });
 
+  const clearProjectionTurnCheckpointsByThread = SqlSchema.void({
+    Request: DeleteProjectionTurnsByThreadInput,
+    execute: ({ threadId }) =>
+      sql`
+        UPDATE projection_turns
+        SET
+          checkpoint_turn_count = NULL,
+          checkpoint_ref = NULL,
+          checkpoint_status = NULL,
+          checkpoint_files_json = '[]'
+        WHERE thread_id = ${threadId}
+      `,
+  });
+
   const deleteProjectionTurnsByThread = SqlSchema.void({
     Request: DeleteProjectionTurnsByThreadInput,
     execute: ({ threadId }) =>
@@ -332,6 +346,15 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
         ),
       );
 
+  const clearCheckpointsByThreadId: ProjectionTurnRepositoryShape["clearCheckpointsByThreadId"] = (
+    input,
+  ) =>
+    clearProjectionTurnCheckpointsByThread(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionTurnRepository.clearCheckpointsByThreadId:query"),
+      ),
+    );
+
   const deleteByThreadId: ProjectionTurnRepositoryShape["deleteByThreadId"] = (input) =>
     deleteProjectionTurnsByThread(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionTurnRepository.deleteByThreadId:query")),
@@ -345,6 +368,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
     listByThreadId,
     getByTurnId,
     clearCheckpointTurnConflict,
+    clearCheckpointsByThreadId,
     deleteByThreadId,
   } satisfies ProjectionTurnRepositoryShape;
 });

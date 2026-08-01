@@ -1,5 +1,9 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
+import {
+  isGeneralChatProjectId,
+  type EnvironmentId,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
@@ -80,6 +84,7 @@ function collectProjectWinnersByPhysicalKey(input: {
 }): Map<string, SidebarProjectGroupCandidate> {
   const winnersByPhysicalKey = new Map<string, SidebarProjectGroupCandidate>();
   for (const project of input.projects) {
+    if (isGeneralChatProjectId(project.id)) continue;
     const logicalKey = deriveLogicalProjectKeyFromSettings(project, input.settings);
     const physicalProjectKey = derivePhysicalProjectKey(project);
     const existing = winnersByPhysicalKey.get(physicalProjectKey);
@@ -123,6 +128,7 @@ export function buildSidebarProjectSnapshots(input: {
   // legacy behavior.
   isDesktopLocalEnvironment?: (environmentId: EnvironmentId) => boolean;
 }): SidebarProjectSnapshot[] {
+  const visibleProjects = input.projects.filter((project) => !isGeneralChatProjectId(project.id));
   const winnersByPhysicalKey = collectProjectWinnersByPhysicalKey(input);
   const groupedMembers = new Map<string, SidebarProjectGroupMember[]>();
   for (const { logicalKey, project } of winnersByPhysicalKey.values()) {
@@ -141,7 +147,7 @@ export function buildSidebarProjectSnapshots(input: {
 
   const projectRefsByLogicalKey = new Map<string, ScopedProjectRef[]>();
   const seenProjectRefs = new Set<string>();
-  for (const project of input.projects) {
+  for (const project of visibleProjects) {
     const physicalProjectKey = derivePhysicalProjectKey(project);
     const logicalKey =
       winnersByPhysicalKey.get(physicalProjectKey)?.logicalKey ??
@@ -161,7 +167,7 @@ export function buildSidebarProjectSnapshots(input: {
 
   const result: SidebarProjectSnapshot[] = [];
   const seen = new Set<string>();
-  for (const project of input.projects) {
+  for (const project of visibleProjects) {
     const logicalKey = deriveLogicalProjectKeyFromSettings(project, input.settings);
     if (seen.has(logicalKey)) {
       continue;

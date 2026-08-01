@@ -735,6 +735,29 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.project-moved": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            projectId: event.payload.projectId,
+            branch: null,
+            worktreePath: null,
+            updatedAt: event.payload.updatedAt,
+          });
+          yield* projectionThreadSessionRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          yield* projectionTurnRepository.clearCheckpointsByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+        }
+
         case "thread.runtime-mode-set": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
