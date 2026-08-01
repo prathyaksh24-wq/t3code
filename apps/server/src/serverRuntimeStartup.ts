@@ -2,6 +2,7 @@ import {
   CommandId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  GENERAL_CHAT_PROJECT_ID,
   type ModelSelection,
   ProjectId,
   ProviderInstanceId,
@@ -13,6 +14,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -164,6 +166,37 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
 export const getAutoBootstrapDefaultModelSelection = (): ModelSelection => ({
   instanceId: ProviderInstanceId.make("codex"),
   model: DEFAULT_MODEL,
+});
+
+export const ensureGeneralChatProject = Effect.gen(function* () {
+  const serverConfig = yield* ServerConfig.ServerConfig;
+  const projectionReadModelQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  const existingProject =
+    yield* projectionReadModelQuery.getProjectShellById(GENERAL_CHAT_PROJECT_ID);
+  if (Option.isSome(existingProject)) {
+    return existingProject.value;
+  }
+
+  const workspaceRoot = path.join(serverConfig.projectsDir, "general-chat");
+  yield* fs.makeDirectory(workspaceRoot, { recursive: true });
+  const createdAt = DateTime.formatIso(yield* DateTime.now);
+  yield* orchestrationEngine.dispatch({
+    type: "project.create",
+    commandId: CommandId.make(`server:general-chat-project:${createdAt}`),
+    projectId: GENERAL_CHAT_PROJECT_ID,
+    title: "General chats",
+    workspaceRoot,
+    defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
+    createdAt,
+  });
+
+  const createdProject =
+    yield* projectionReadModelQuery.getProjectShellById(GENERAL_CHAT_PROJECT_ID);
+  return Option.getOrThrow(createdProject);
 });
 
 export const resolveWelcomeBase = Effect.gen(function* () {
@@ -345,6 +378,8 @@ export const make = Effect.gen(function* () {
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
       }),
     );
+
+    yield* runStartupPhase("general-chat-project.ensure", ensureGeneralChatProject);
 
     const welcomeBase = yield* resolveWelcomeBase;
     const environment = yield* serverEnvironment.getDescriptor;

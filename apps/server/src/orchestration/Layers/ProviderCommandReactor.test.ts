@@ -38,6 +38,9 @@ import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as ProviderSessionRuntime from "../../persistence/ProviderSessionRuntime.ts";
+import { ProviderSessionDirectoryLive } from "../../provider/Layers/ProviderSessionDirectory.ts";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -91,7 +94,10 @@ async function waitFor(
 
 describe("ProviderCommandReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderCommandReactor | ProjectionSnapshotQuery,
+    | OrchestrationEngineService
+    | ProviderCommandReactor
+    | ProjectionSnapshotQuery
+    | ProviderSessionDirectory,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -146,6 +152,7 @@ describe("ProviderCommandReactor", () => {
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     readonly requiresNewThreadForModelChange?: boolean;
+    readonly stopSessionEffect?: ProviderServiceShape["stopSession"];
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -234,20 +241,24 @@ describe("ProviderCommandReactor", () => {
     const interruptTurn = vi.fn((_: unknown) => Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
-    const stopSession = vi.fn((input: unknown) =>
-      Effect.sync(() => {
-        const threadId =
-          typeof input === "object" && input !== null && "threadId" in input
-            ? (input as { threadId?: ThreadId }).threadId
-            : undefined;
-        if (!threadId) {
-          return;
-        }
-        const index = runtimeSessions.findIndex((session) => session.threadId === threadId);
-        if (index >= 0) {
-          runtimeSessions.splice(index, 1);
-        }
-      }),
+    const stopSession = vi.fn<ProviderServiceShape["stopSession"]>((stopInput) =>
+      (input?.stopSessionEffect?.(stopInput) ?? Effect.void).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            const threadId =
+              typeof stopInput === "object" && stopInput !== null && "threadId" in stopInput
+                ? (stopInput as { threadId?: ThreadId }).threadId
+                : undefined;
+            if (!threadId) {
+              return;
+            }
+            const index = runtimeSessions.findIndex((session) => session.threadId === threadId);
+            if (index >= 0) {
+              runtimeSessions.splice(index, 1);
+            }
+          }),
+        ),
+      ),
     );
     const renameBranch = vi.fn((input: unknown) =>
       Effect.succeed({
@@ -353,10 +364,15 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provide(SqlitePersistenceMemory),
     );
+    const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
+      Layer.provide(ProviderSessionRuntime.layer),
+      Layer.provide(SqlitePersistenceMemory),
+    );
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
+      Layer.provideMerge(providerSessionDirectoryLayer),
       Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
       Layer.provideMerge(
         Layer.mock(GitWorkflowService.GitWorkflowService)({
@@ -387,6 +403,7 @@ describe("ProviderCommandReactor", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
+    const sessionDirectory = await runtime.runPromise(Effect.service(ProviderSessionDirectory));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(reactor.drain);
@@ -432,6 +449,13 @@ describe("ProviderCommandReactor", () => {
       generateBranchName,
       generateThreadTitle,
       runtimeSessions,
+      sessionDirectory,
+      dispatch: (command: Parameters<typeof engine.dispatch>[0]) =>
+        Effect.runPromise(engine.dispatch(command)),
+      upsertSessionBinding: (binding: Parameters<typeof sessionDirectory.upsert>[0]) =>
+        Effect.runPromise(sessionDirectory.upsert(binding)),
+      getSessionBinding: (threadId: ThreadId) =>
+        Effect.runPromise(sessionDirectory.getBinding(threadId)),
       stateDir,
       drain,
     };
@@ -2129,18 +2153,16 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.user-input.respond",
-        commandId: CommandId.make("cmd-user-input-respond-stale"),
-        threadId: ThreadId.make("thread-1"),
-        requestId: asApprovalRequestId("user-input-request-1"),
-        answers: {
-          sandbox_mode: "workspace-write",
-        },
-        createdAt: now,
-      }),
-    );
+    await harness.dispatch({
+      type: "thread.user-input.respond",
+      commandId: CommandId.make("cmd-user-input-respond-stale"),
+      threadId: ThreadId.make("thread-1"),
+      requestId: asApprovalRequestId("user-input-request-1"),
+      answers: {
+        sandbox_mode: "workspace-write",
+      },
+      createdAt: now,
+    });
 
     await waitFor(async () => {
       const readModel = await harness.readModel();
@@ -2178,33 +2200,29 @@ describe("ProviderCommandReactor", () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-for-stop"),
+    await harness.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("cmd-session-set-for-stop"),
+      threadId: ThreadId.make("thread-1"),
+      session: {
         threadId: ThreadId.make("thread-1"),
-        session: {
-          threadId: ThreadId.make("thread-1"),
-          status: "ready",
-          providerName: "codex",
-          providerInstanceId: ProviderInstanceId.make("codex_work"),
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: now,
-        },
-        createdAt: now,
-      }),
-    );
+        status: "ready",
+        providerName: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex_work"),
+        runtimeMode: "approval-required",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: now,
+      },
+      createdAt: now,
+    });
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.session.stop",
-        commandId: CommandId.make("cmd-session-stop"),
-        threadId: ThreadId.make("thread-1"),
-        createdAt: now,
-      }),
-    );
+    await harness.dispatch({
+      type: "thread.session.stop",
+      commandId: CommandId.make("cmd-session-stop"),
+      threadId: ThreadId.make("thread-1"),
+      createdAt: now,
+    });
 
     await waitFor(() => harness.stopSession.mock.calls.length === 1);
     const readModel = await harness.readModel();
@@ -2214,5 +2232,106 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
     expect(thread?.session?.activeTurnId).toBeNull();
+  });
+
+  it("stops provider continuity when a thread moves to another project", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await harness.dispatch({
+      type: "project.create",
+      commandId: CommandId.make("cmd-target-project-create"),
+      projectId: asProjectId("project-2"),
+      title: "Target Project",
+      workspaceRoot: "/tmp/target-project",
+      defaultModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      createdAt: now,
+    });
+    await harness.upsertSessionBinding({
+      threadId: ThreadId.make("thread-1"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "stopped",
+      resumeCursor: { threadId: "provider-thread-1" },
+      runtimePayload: { activeTurnId: "provider-turn-1" },
+    });
+
+    await harness.dispatch({
+      type: "thread.project.move",
+      commandId: CommandId.make("cmd-thread-project-move"),
+      threadId: ThreadId.make("thread-1"),
+      projectId: asProjectId("project-2"),
+      createdAt: now,
+    });
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+    await harness.drain();
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    const binding = await harness.getSessionBinding(ThreadId.make("thread-1"));
+
+    expect(thread?.projectId).toBe(asProjectId("project-2"));
+    expect(binding._tag).toBe("Some");
+    if (binding._tag === "Some") {
+      expect(binding.value.status).toBe("stopped");
+      expect(binding.value.resumeCursor).toBeNull();
+      expect(binding.value.runtimePayload).toBeNull();
+    }
+  });
+
+  it("keeps provider continuity when stopping the old session fails", async () => {
+    const harness = await createHarness({
+      stopSessionEffect: () =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: ProviderDriverKind.make("codex"),
+            method: "thread/project-move",
+            detail: "provider process did not stop",
+          }),
+        ),
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const threadId = ThreadId.make("thread-1");
+
+    await harness.dispatch({
+      type: "project.create",
+      commandId: CommandId.make("cmd-failed-stop-target-project-create"),
+      projectId: asProjectId("project-2"),
+      title: "Target Project",
+      workspaceRoot: "/tmp/target-project",
+      defaultModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      createdAt: now,
+    });
+    await harness.upsertSessionBinding({
+      threadId,
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "stopped",
+      resumeCursor: { threadId: "provider-thread-1" },
+      runtimePayload: { activeTurnId: "provider-turn-1" },
+    });
+
+    await harness.dispatch({
+      type: "thread.project.move",
+      commandId: CommandId.make("cmd-thread-project-move-failed-stop"),
+      threadId,
+      projectId: asProjectId("project-2"),
+      createdAt: now,
+    });
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+    const binding = await harness.getSessionBinding(threadId);
+
+    expect(binding._tag).toBe("Some");
+    if (binding._tag === "Some") {
+      expect(binding.value.resumeCursor).toEqual({ threadId: "provider-thread-1" });
+      expect(binding.value.runtimePayload).toEqual({ activeTurnId: "provider-turn-1" });
+    }
   });
 });

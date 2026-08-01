@@ -1,4 +1,9 @@
-import { EnvironmentId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  GENERAL_CHAT_PROJECT_ID,
+  ProjectId,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -348,5 +353,29 @@ describe("environment grouping", () => {
     });
 
     expect(groups.map((group) => group.displayName)).toEqual(["separate", "shared-repo"]);
+  });
+
+  it("keeps the app-owned general workspace out of project navigation", () => {
+    const generalChatWorkspace = makeProject({
+      id: GENERAL_CHAT_PROJECT_ID,
+      title: "General chats",
+      workspaceRoot: "/tmp/general-chat",
+    });
+    const project = makeProject();
+
+    const groups = buildSidebarProjectSnapshots({
+      projects: [generalChatWorkspace, project],
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => null,
+    });
+    const physicalToLogicalKey = buildPhysicalToLogicalProjectKeyMap({
+      projects: [generalChatWorkspace, project],
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+    });
+
+    expect(groups.map((group) => group.id)).toEqual([project.id]);
+    expect(physicalToLogicalKey.has(derivePhysicalProjectKey(generalChatWorkspace))).toBe(false);
   });
 });

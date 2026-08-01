@@ -1,5 +1,17 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { DEFAULT_MODEL, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL,
+  GENERAL_CHAT_PROJECT_ID,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type OrchestrationProjectShell,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -22,6 +34,77 @@ it("uses the canonical Codex default for auto-bootstrapped model selection", () 
     model: DEFAULT_MODEL,
   });
 });
+
+it.effect("creates the hidden general-chat workspace once", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const projectsDir = yield* Effect.acquireRelease(
+        Effect.sync(() => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-general-chat-"))),
+        (path) => Effect.sync(() => NodeFS.rmSync(path, { recursive: true, force: true })),
+      );
+      let storedProject: OrchestrationProjectShell | null = null;
+      const dispatchCalls: string[] = [];
+      const projectionQuery = {
+        getCommandReadModel: () => Effect.die("unused"),
+        getSnapshot: () => Effect.die("unused"),
+        getShellSnapshot: () => Effect.die("unused"),
+        getArchivedShellSnapshot: () => Effect.die("unused"),
+        getSnapshotSequence: () => Effect.die("unused"),
+        getCounts: () => Effect.die("unused"),
+        getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+        getProjectShellById: () =>
+          Effect.succeed(storedProject === null ? Option.none() : Option.some(storedProject)),
+        getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+        getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+        getFullThreadDiffContext: () => Effect.succeed(Option.none()),
+        getThreadShellById: () => Effect.succeed(Option.none()),
+        getThreadDetailById: () => Effect.succeed(Option.none()),
+        getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+      } satisfies ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"];
+      const engine = {
+        readEvents: () => Stream.empty,
+        dispatch: (
+          command: Parameters<
+            OrchestrationEngine.OrchestrationEngineService["Service"]["dispatch"]
+          >[0],
+        ) =>
+          Effect.sync(() => {
+            dispatchCalls.push(command.type);
+            if (command.type === "project.create") {
+              storedProject = {
+                id: command.projectId,
+                title: command.title,
+                workspaceRoot: command.workspaceRoot,
+                defaultModelSelection: command.defaultModelSelection ?? null,
+                scripts: [],
+                createdAt: command.createdAt,
+                updatedAt: command.createdAt,
+              };
+            }
+            return { sequence: 1 };
+          }),
+        streamDomainEvents: Stream.empty,
+        latestSequence: Effect.succeed(0),
+      } satisfies OrchestrationEngine.OrchestrationEngineService["Service"];
+      const runEnsure = ServerRuntimeStartup.ensureGeneralChatProject.pipe(
+        Effect.provideService(ServerConfig.ServerConfig, {
+          projectsDir,
+        } as never),
+        Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, projectionQuery),
+        Effect.provideService(OrchestrationEngine.OrchestrationEngineService, engine),
+        Effect.provide(NodeServices.layer),
+      );
+
+      const first = yield* runEnsure;
+      const second = yield* runEnsure;
+
+      assert.equal(first.id, GENERAL_CHAT_PROJECT_ID);
+      assert.equal(second.id, GENERAL_CHAT_PROJECT_ID);
+      assert.deepStrictEqual(dispatchCalls, ["project.create"]);
+      assert.equal(NodeFS.existsSync(NodePath.join(projectsDir, "general-chat")), true);
+    }),
+  ),
+);
 
 it.effect("enqueueCommand waits for readiness and then drains queued work", () =>
   Effect.scoped(

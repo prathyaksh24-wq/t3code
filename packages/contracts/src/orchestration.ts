@@ -624,6 +624,14 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 
+const ThreadProjectMoveCommand = Schema.Struct({
+  type: Schema.Literal("thread.project.move"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
 const ThreadRuntimeModeSetCommand = Schema.Struct({
   type: Schema.Literal("thread.runtime-mode.set"),
   commandId: CommandId,
@@ -764,6 +772,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadMetaUpdateCommand,
+  ThreadProjectMoveCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
@@ -789,6 +798,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadMetaUpdateCommand,
+  ThreadProjectMoveCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
@@ -909,6 +919,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.snoozed",
   "thread.unsnoozed",
   "thread.meta-updated",
+  "thread.project-moved",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
@@ -1022,6 +1033,13 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadProjectMovedPayload = Schema.Struct({
+  threadId: ThreadId,
+  previousProjectId: ProjectId,
+  projectId: ProjectId,
   updatedAt: IsoDateTime,
 });
 
@@ -1209,6 +1227,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.meta-updated"),
     payload: ThreadMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.project-moved"),
+    payload: ThreadProjectMovedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

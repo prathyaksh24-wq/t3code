@@ -1,4 +1,4 @@
-import type { ScopedProjectRef } from "@t3tools/contracts";
+import { isGeneralChatProjectId, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
@@ -92,8 +92,10 @@ export function DraftHeroHeadline({
           ),
         ) ?? null);
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
+  const isGeneralChat =
+    activeProjectRef !== null && isGeneralChatProjectId(activeProjectRef.projectId);
   const activeProjectDisplayName = activeProjectGroup?.displayName ?? activeProjectTitle;
-  const hasResolvedProject = activeProjectTitle !== null;
+  const hasResolvedProject = activeProjectTitle !== null && !isGeneralChat;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
 
@@ -103,7 +105,7 @@ export function DraftHeroHeadline({
         aria-label={hasResolvedProject ? "Change project" : "Choose a project"}
         className="pointer-events-auto inline cursor-pointer border-foreground/60 border-b border-dotted text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {activeProjectDisplayName ?? "Choose a project"}
+        {isGeneralChat ? "Attach a project" : (activeProjectDisplayName ?? "Choose a project")}
       </MenuTrigger>
       <MenuPopup align="center" className="max-h-80 min-w-40! w-max max-w-64 overflow-y-auto">
         <MenuRadioGroup
@@ -148,6 +150,13 @@ export function DraftHeroHeadline({
     <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
       {hasResolvedProject ? (
         <>What should we build in {projectSelector}?</>
+      ) : isGeneralChat ? (
+        <>
+          What should we build?
+          <span className="mt-3 block text-sm font-normal tracking-normal text-muted-foreground/70">
+            {projectSelector}
+          </span>
+        </>
       ) : canChooseProject ? (
         <>{projectSelector} to start</>
       ) : (

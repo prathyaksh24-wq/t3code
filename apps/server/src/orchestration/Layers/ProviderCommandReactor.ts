@@ -13,6 +13,7 @@ import {
   type RunId,
   type TraceId,
   type TurnId,
+  defaultInstanceIdForDriver,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
@@ -34,6 +35,7 @@ import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -58,6 +60,7 @@ type ProviderIntentEvent = Extract<
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
+      | "thread.project-moved"
       | "thread.session-stop-requested";
   }
 >;
@@ -196,6 +199,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const providerSessionDirectory = yield* ProviderSessionDirectory;
   const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
@@ -1067,6 +1071,25 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const processThreadProjectMoved = Effect.fn("processThreadProjectMoved")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.project-moved" }>,
+  ) {
+    const binding = yield* providerSessionDirectory.getBinding(event.payload.threadId);
+    if (Option.isNone(binding)) {
+      return;
+    }
+
+    yield* providerService.stopSession({ threadId: event.payload.threadId });
+    yield* providerSessionDirectory.upsert({
+      ...binding.value,
+      providerInstanceId:
+        binding.value.providerInstanceId ?? defaultInstanceIdForDriver(binding.value.provider),
+      status: "stopped",
+      resumeCursor: null,
+      runtimePayload: null,
+    });
+  });
+
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -1106,6 +1129,9 @@ const make = Effect.gen(function* () {
       case "thread.user-input-response-requested":
         yield* processUserInputResponseRequested(event);
         return;
+      case "thread.project-moved":
+        yield* processThreadProjectMoved(event);
+        return;
       case "thread.session-stop-requested":
         yield* processSessionStopRequested(event);
         return;
@@ -1135,6 +1161,7 @@ const make = Effect.gen(function* () {
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
+        event.type === "thread.project-moved" ||
         event.type === "thread.session-stop-requested"
       ) {
         return yield* worker.enqueue(event);

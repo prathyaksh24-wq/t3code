@@ -1,4 +1,5 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { GENERAL_CHAT_PROJECT_ID } from "@t3tools/contracts";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
+import { WorkspaceRouteLoading } from "../components/WorkspaceRouteState";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import {
   useAllEnvironmentShellsBootstrapped,
@@ -33,8 +35,9 @@ function ChatIndexRouteView() {
 
 /**
  * Landing on the index route drops straight into a draft thread for the most
- * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
+ * app-owned general workspace, so the first screen is a prompt instead of a
+ * project picker. Older remote servers without that workspace keep the
+ * add-project fallback.
  */
 function IndexDraftLanding() {
   const projects = useProjects();
@@ -47,7 +50,13 @@ function IndexDraftLanding() {
   const mostRecentProject = useMemo(
     () =>
       bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
+        ? (projects.find((project) => project.id === GENERAL_CHAT_PROJECT_ID) ??
+          sortScopedProjectsForSidebar(
+            projects.filter((project) => project.id !== GENERAL_CHAT_PROJECT_ID),
+            threads,
+            "updated_at",
+          )[0] ??
+          null)
         : null,
     [bootstrapped, projects, threads],
   );
@@ -66,7 +75,7 @@ function IndexDraftLanding() {
   }, [handleNewThread, mostRecentProject, startState.retryRequest]);
 
   if (!bootstrapped) {
-    return null;
+    return <WorkspaceRouteLoading />;
   }
   if (mostRecentProject !== null) {
     return startState.failed ? (
@@ -78,7 +87,9 @@ function IndexDraftLanding() {
           }));
         }}
       />
-    ) : null;
+    ) : (
+      <WorkspaceRouteLoading label="Starting a new chat" />
+    );
   }
   return <NoProjectsHero />;
 }

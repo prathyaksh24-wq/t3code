@@ -1,5 +1,6 @@
 import {
   EventId,
+  GENERAL_CHAT_PROJECT_ID,
   RunId,
   TraceId,
   type OrchestrationCommand,
@@ -270,6 +271,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.meta.update": {
+      if (command.projectId === GENERAL_CHAT_PROJECT_ID) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "The general chat workspace is managed by the server.",
+          }),
+        );
+      }
       yield* requireProject({
         readModel,
         command,
@@ -306,6 +315,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.delete": {
+      if (command.projectId === GENERAL_CHAT_PROJECT_ID) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "The general chat workspace cannot be removed.",
+          }),
+        );
+      }
       yield* requireProject({
         readModel,
         command,
@@ -672,6 +689,54 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(branch !== undefined ? { branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.project.move": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (
+        thread.session?.status === "starting" ||
+        thread.session?.status === "running" ||
+        thread.latestTurn?.state === "running"
+      ) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `thread ${command.threadId} has active work and cannot move projects`,
+          }),
+        );
+      }
+      if (thread.projectId === command.projectId) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `thread ${command.threadId} is already in project ${command.projectId}`,
+          }),
+        );
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.project-moved",
+        payload: {
+          threadId: command.threadId,
+          previousProjectId: thread.projectId,
+          projectId: command.projectId,
+          updatedAt: command.createdAt,
         },
       };
     }

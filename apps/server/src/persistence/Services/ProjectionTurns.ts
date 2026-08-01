@@ -156,6 +156,12 @@ export interface ProjectionTurnRepositoryShape {
     input: ClearCheckpointTurnConflictInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
+  /** Clears checkpoint metadata when a thread changes workspace while keeping
+      its conversation and completed turn history. */
+  readonly clearCheckpointsByThreadId: (
+    input: DeleteProjectionTurnsByThreadInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
   /**
    * Hard-deletes all projection rows for a thread, including pending-start placeholders and checkpoint metadata rows.
    */

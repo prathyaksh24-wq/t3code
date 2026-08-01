@@ -1121,6 +1121,16 @@ const makeWsRpcLayer = (
                   ),
                 );
               }
+              if (normalizedCommand.type === "thread.project.move") {
+                yield* terminalManager.close({ threadId: normalizedCommand.threadId }).pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning("failed to close thread terminals after project move", {
+                      threadId: normalizedCommand.threadId,
+                      error: error.message,
+                    }),
+                  ),
+                );
+              }
               return result;
             }).pipe(
               Effect.mapError((cause) =>
