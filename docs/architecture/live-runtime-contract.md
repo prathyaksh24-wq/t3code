@@ -23,13 +23,31 @@ Provider snapshots expose these runtime capabilities:
 - session resume
 - turn cancellation
 - conversation rollback
+- execution modes supported by the selected runtime
 
 Each capability is either `supported` or `unsupported`. Unsupported capabilities
 must include a non-empty reason. A client should disable the affected action and
 show that reason instead of attempting the operation.
 
+`executionModes` is an ordered list of the safety modes the adapter can send to
+that runtime. Older snapshots without this field use the compatibility set;
+new clients must filter composer controls from the selected instance's list and
+must not infer support from a provider name. An empty reported list means the
+runtime exposed no selectable access mode.
+
 The capability value describes the installed adapter path. It does not imply that
 all models, accounts, or remote environments have identical access.
+
+## Runtime settings and credentials
+
+Provider settings keep runtime configuration separate from the selected model and
+execution mode. Sensitive environment values and provider configuration secrets
+are written through the server secret store; `settings.json`, WebSocket payloads,
+and ordinary client persistence contain only an empty value plus a redaction
+marker. The server materializes the secret only at the adapter boundary. Settings
+forms must preserve a redacted value until the user explicitly replaces or clears
+it, and diagnostics must report the provider instance and setting key without the
+secret.
 
 ## Deterministic fixtures
 

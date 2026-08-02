@@ -32,9 +32,26 @@ describe("ProviderSettingsForm helpers", () => {
 
     expect(serverPassword).toMatchObject({
       label: "Server password",
-      description: "Stored in plain text on disk.",
+      description: "Stored in the local secret store, not in settings.json.",
       control: "password",
     });
+  });
+
+  it("clears a redacted marker when replacing a stored password", () => {
+    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
+    expect(opencode).toBeDefined();
+    const serverPassword = deriveProviderSettingsFields(opencode!).find(
+      (field) => field.key === "serverPassword",
+    );
+    expect(serverPassword).toBeDefined();
+
+    expect(
+      nextProviderConfigWithFieldValue(
+        { serverPassword: "", serverPasswordRedacted: true },
+        serverPassword!,
+        "new-secret",
+      ),
+    ).toEqual({ serverPassword: "new-secret" });
   });
 
   it("preserves unknown config keys while omitting empty configurable fields", () => {

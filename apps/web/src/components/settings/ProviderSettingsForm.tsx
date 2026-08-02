@@ -127,6 +127,10 @@ export function readProviderConfigBoolean(
   return typeof value === "boolean" ? value : defaultValue;
 }
 
+function isProviderConfigValueRedacted(config: unknown, key: string): boolean {
+  return readProviderConfigBoolean(config, `${key}Redacted`, false);
+}
+
 export function nextProviderConfigWithFieldValue(
   config: unknown,
   field: ProviderSettingsFieldModel,
@@ -145,6 +149,9 @@ export function nextProviderConfigWithFieldValue(
     return Object.keys(base).length > 0 ? base : undefined;
   }
 
+  if (field.control === "password") {
+    delete base[`${field.key}Redacted`];
+  }
   const trimmed = value.trim();
   if (field.clearWhenEmpty === "omit" && trimmed.length === 0) {
     delete base[field.key];
@@ -196,6 +203,11 @@ function ProviderSettingsFieldRow({
   const description = field.description ? (
     <span className={descriptionClassName}>{field.description}</span>
   ) : null;
+  const redactedPassword =
+    field.control === "password" && isProviderConfigValueRedacted(value, field.key);
+  const placeholder = redactedPassword
+    ? "Stored secret - enter a new value to replace"
+    : field.placeholder;
 
   if (field.control === "switch") {
     return (
@@ -229,7 +241,7 @@ function ProviderSettingsFieldRow({
             onChange={(event) =>
               onChange(nextProviderConfigWithFieldValue(value, field, event.target.value))
             }
-            placeholder={field.placeholder}
+            placeholder={placeholder}
             spellCheck={false}
           />
           {description}
@@ -251,7 +263,7 @@ function ProviderSettingsFieldRow({
             autoComplete={field.control === "password" ? "off" : undefined}
             value={readProviderConfigString(value, field.key)}
             onCommit={(next) => onChange(nextProviderConfigWithFieldValue(value, field, next))}
-            placeholder={field.placeholder}
+            placeholder={placeholder}
             spellCheck={false}
           />
         ) : (

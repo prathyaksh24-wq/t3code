@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
@@ -92,10 +93,26 @@ export const ProviderRuntimeCapability = Schema.Union([
 ]);
 export type ProviderRuntimeCapability = typeof ProviderRuntimeCapability.Type;
 
+/**
+ * Runtime modes are the safety policies the client can send with a turn.
+ * They are reported by the adapter instead of being inferred from the
+ * provider name so a provider can expose a smaller, runtime-specific set in
+ * the future.
+ */
+export const DEFAULT_PROVIDER_RUNTIME_MODES: ReadonlyArray<RuntimeMode> = [
+  "approval-required",
+  "auto-accept-edits",
+  "auto",
+  "full-access",
+];
+
 export const ProviderRuntimeCapabilities = Schema.Struct({
   sessionResume: ProviderRuntimeCapability,
   turnCancellation: ProviderRuntimeCapability,
   conversationRollback: ProviderRuntimeCapability,
+  executionModes: Schema.Array(RuntimeMode).pipe(
+    Schema.withDecodingDefault(Effect.succeed([...DEFAULT_PROVIDER_RUNTIME_MODES])),
+  ),
 });
 export type ProviderRuntimeCapabilities = typeof ProviderRuntimeCapabilities.Type;
 

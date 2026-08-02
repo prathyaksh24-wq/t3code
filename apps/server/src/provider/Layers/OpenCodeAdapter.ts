@@ -1,5 +1,6 @@
 import {
   EventId,
+  DEFAULT_PROVIDER_RUNTIME_MODES,
   type OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -1702,6 +1703,7 @@ export function makeOpenCodeAdapter(
       capabilities: {
         sessionModelSwitch: "in-session",
         runtime: {
+          executionModes: [...DEFAULT_PROVIDER_RUNTIME_MODES],
           sessionResume: { support: "supported" },
           turnCancellation: { support: "supported" },
           conversationRollback: { support: "supported" },
