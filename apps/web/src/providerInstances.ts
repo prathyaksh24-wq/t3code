@@ -60,6 +60,8 @@ export interface ProviderInstanceEntry {
   readonly isDefault: boolean;
   /** True when `availability === "unavailable"` is absent or "available". */
   readonly isAvailable: boolean;
+  /** Safe account/runtime label from the provider auth snapshot. */
+  readonly accountLabel?: string | undefined;
   readonly snapshot: ServerProvider;
   readonly models: ReadonlyArray<ServerProviderModel>;
 }
@@ -165,6 +167,10 @@ export function deriveProviderInstanceEntries(
     const defaultId = defaultInstanceIdForDriver(driverKind);
     const isDefault = instanceId === defaultId;
     const displayName = resolveInstanceDisplayName(snapshot, instanceId, driverKind, isDefault);
+    const accountLabel =
+      snapshot.auth.status === "authenticated"
+        ? snapshot.auth.label?.trim() || snapshot.auth.type?.trim() || "Authenticated account"
+        : undefined;
     return {
       instanceId,
       driverKind,
@@ -176,6 +182,7 @@ export function deriveProviderInstanceEntries(
       status: snapshot.status,
       isDefault,
       isAvailable: snapshot.availability !== "unavailable",
+      ...(accountLabel ? { accountLabel } : {}),
       snapshot,
       models: snapshot.models,
     } satisfies ProviderInstanceEntry;

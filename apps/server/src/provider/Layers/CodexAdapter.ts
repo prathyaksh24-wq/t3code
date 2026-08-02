@@ -11,6 +11,7 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type CodexSettings,
+  DEFAULT_PROVIDER_RUNTIME_MODES,
   ProviderDriverKind,
   type ProviderEvent,
   ProviderInstanceId,
@@ -1704,6 +1705,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     capabilities: {
       sessionModelSwitch: "in-session",
       runtime: {
+        executionModes: [...DEFAULT_PROVIDER_RUNTIME_MODES],
         sessionResume: { support: "supported" },
         turnCancellation: { support: "supported" },
         conversationRollback: { support: "supported" },

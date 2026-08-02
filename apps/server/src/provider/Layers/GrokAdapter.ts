@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  DEFAULT_PROVIDER_RUNTIME_MODES,
   type GrokSettings,
   EventId,
   type ProviderApprovalDecision,
@@ -1449,6 +1450,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       capabilities: {
         sessionModelSwitch: "in-session",
         runtime: {
+          executionModes: [...DEFAULT_PROVIDER_RUNTIME_MODES],
           sessionResume: { support: "supported" },
           turnCancellation: { support: "supported" },
           conversationRollback: {

@@ -26,6 +26,7 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
+  DEFAULT_PROVIDER_RUNTIME_MODES,
   EventId,
   type ProviderApprovalDecision,
   ProviderDriverKind,
@@ -3930,6 +3931,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     capabilities: {
       sessionModelSwitch: "in-session",
       runtime: {
+        executionModes: [...DEFAULT_PROVIDER_RUNTIME_MODES],
         sessionResume: { support: "supported" },
         turnCancellation: { support: "supported" },
         conversationRollback: { support: "supported" },

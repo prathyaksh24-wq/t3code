@@ -25,6 +25,10 @@ function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
   return msg ? `${label} — ${kind}. ${msg}` : `${label} — ${kind}.`;
 }
 
+function describeReadyInstance(entry: ProviderInstanceEntry): string {
+  return entry.accountLabel ? `${entry.displayName} · ${entry.accountLabel}` : entry.displayName;
+}
+
 const SELECTED_INDICATOR_CLASS =
   "pointer-events-none absolute -right-1 top-1/2 z-10 h-5 w-0.75 -translate-y-1/2 rounded-l-full bg-primary";
 const BADGE_BASE_CLASS =
@@ -151,8 +155,8 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               : isContextDisabled
                 ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
                 : showNewBadge
-                  ? `${entry.displayName} — New`
-                  : entry.displayName;
+                  ? `${describeReadyInstance(entry)} — New`
+                  : describeReadyInstance(entry);
 
             const button = (
               <button
@@ -176,8 +180,8 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   isDisabled
                     ? tooltip
                     : showNewBadge
-                      ? `${entry.displayName}, new`
-                      : entry.displayName
+                      ? `${describeReadyInstance(entry)}, new`
+                      : describeReadyInstance(entry)
                 }
               >
                 <ProviderInstanceIcon

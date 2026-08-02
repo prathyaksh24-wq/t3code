@@ -26,6 +26,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
    * "Codex Personal" render with their user-authored label.
    */
   providerDisplayName: string;
+  /** Safe auth label (for example "ChatGPT" or "API key") when reported. */
+  providerAccountLabel?: string | undefined;
   providerAccentColor?: string | undefined;
   isFavorite: boolean;
   isSelected: boolean;
@@ -38,9 +40,13 @@ export const ModelListRow = memo(function ModelListRow(props: {
   onToggleFavorite: () => void;
 }) {
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
-  const providerLabel = props.model.subProvider
-    ? `${props.providerDisplayName} · ${props.model.subProvider}`
-    : props.providerDisplayName;
+  const providerLabel = [
+    props.providerDisplayName,
+    props.providerAccountLabel,
+    props.model.subProvider,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" · ");
 
   const row = (
     <ComboboxItem

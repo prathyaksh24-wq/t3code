@@ -20,6 +20,10 @@ import * as ServerSettingsModule from "./serverSettings.ts";
 
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
+const decodeServerSettingsJson = (value: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+    Effect.flatMap(decodeServerSettings),
+  );
 
 const makeServerSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
@@ -503,6 +507,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         binaryPath: "/opt/homebrew/bin/opencode",
         serverUrl: "http://127.0.0.1:4096",
         serverPassword: "secret-password",
+        serverPasswordRedacted: true,
         customModels: [],
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
@@ -565,7 +570,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
           opencode: {
             serverUrl: "http://127.0.0.1:4096",
-            serverPassword: "secret-password",
+            serverPasswordRedacted: true,
           },
         },
         automaticGitFetchInterval: Duration.seconds(10),
@@ -587,11 +592,74 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
           opencode: {
             serverUrl: "http://127.0.0.1:4096",
-            serverPassword: "secret-password",
+            serverPasswordRedacted: true,
           },
         },
         automaticGitFetchInterval: 10_000,
       });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("stores OpenCode passwords outside settings.json", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const instanceId = ProviderInstanceId.make("opencode_personal");
+
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("opencode"),
+            config: {
+              serverUrl: "http://127.0.0.1:4096",
+              serverPassword: "instance-secret",
+            },
+          },
+        },
+      });
+
+      assert.equal(
+        (next.providerInstances[instanceId]?.config as { serverPassword?: string }).serverPassword,
+        "instance-secret",
+      );
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notInclude(raw, "instance-secret");
+      const persisted = yield* decodeServerSettingsJson(raw);
+      assert.deepEqual(persisted.providerInstances[instanceId]?.config, {
+        serverUrl: "http://127.0.0.1:4096",
+        serverPassword: "",
+        serverPasswordRedacted: true,
+      });
+
+      const clientSettings = ServerSettingsModule.redactServerSettingsForClient(next);
+      assert.deepEqual(clientSettings.providerInstances[instanceId]?.config, {
+        serverUrl: "http://127.0.0.1:4096",
+        serverPassword: "",
+        serverPasswordRedacted: true,
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("migrates legacy provider passwords when the settings service starts", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        '{"providers":{"opencode":{"serverPassword":"legacy-secret"}}}',
+      );
+
+      yield* serverSettings.start;
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notInclude(raw, "legacy-secret");
+      const persisted = yield* decodeServerSettingsJson(raw);
+      assert.equal(persisted.providers.opencode.serverPasswordRedacted, true);
+      assert.equal(
+        (yield* serverSettings.getSettings).providers.opencode.serverPassword,
+        "legacy-secret",
+      );
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 

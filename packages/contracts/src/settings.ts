@@ -382,13 +382,16 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "Server password",
-        description: "Stored in plain text on disk.",
+        description: "Stored in the local secret store, not in settings.json.",
         providerSettingsForm: {
           control: "password",
           placeholder: "Optional",
           clearWhenEmpty: "omit",
         },
       }),
+    ),
+    serverPasswordRedacted: Schema.optionalKey(Schema.Boolean).pipe(
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
@@ -504,6 +507,7 @@ export class ServerSettingsError extends Schema.TaggedErrorClass<ServerSettingsE
     operation: ServerSettingsOperation,
     providerInstanceId: Schema.optional(Schema.String),
     environmentVariable: Schema.optional(Schema.String),
+    providerConfigKey: Schema.optional(Schema.String),
     cause: Schema.Defect(),
   },
 ) {
@@ -514,7 +518,9 @@ export class ServerSettingsError extends Schema.TaggedErrorClass<ServerSettingsE
       this.environmentVariable === undefined
         ? ""
         : ` and environment variable ${this.environmentVariable}`;
-    return `Server settings ${this.operation} failed${provider}${variable} at ${this.settingsPath}.`;
+    const config =
+      this.providerConfigKey === undefined ? "" : ` and provider setting ${this.providerConfigKey}`;
+    return `Server settings ${this.operation} failed${provider}${variable}${config} at ${this.settingsPath}.`;
   }
 }
 
@@ -569,6 +575,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   serverUrl: Schema.optionalKey(TrimmedString),
   serverPassword: Schema.optionalKey(TrimmedString),
+  serverPasswordRedacted: Schema.optionalKey(Schema.Boolean),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 

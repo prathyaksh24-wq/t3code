@@ -1603,6 +1603,8 @@ export function ProviderSettingsPanel() {
                   : undefined
               }
               isUpdating={showInlineUpdateButton ? isDriverUpdateRunning : undefined}
+              onRefreshStatus={() => void refreshProviders()}
+              isRefreshingStatus={isRefreshingProviders}
             />
           );
         })}

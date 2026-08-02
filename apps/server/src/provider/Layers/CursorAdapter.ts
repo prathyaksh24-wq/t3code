@@ -6,6 +6,7 @@
 
 import {
   ApprovalRequestId,
+  DEFAULT_PROVIDER_RUNTIME_MODES,
   type CursorSettings,
   type ProviderOptionSelection,
   EventId,
@@ -1167,6 +1168,7 @@ export function makeCursorAdapter(
       capabilities: {
         sessionModelSwitch: "in-session",
         runtime: {
+          executionModes: [...DEFAULT_PROVIDER_RUNTIME_MODES],
           sessionResume: { support: "supported" },
           turnCancellation: { support: "supported" },
           conversationRollback: { support: "supported" },
