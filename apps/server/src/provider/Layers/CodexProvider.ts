@@ -28,7 +28,7 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 import {
-  AUTH_PROBE_TIMEOUT_MS,
+  CODEX_AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
@@ -544,7 +544,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     environment: resolvedEnvironment,
   }).pipe(
     Effect.scoped,
-    Effect.timeoutOption(Duration.millis(AUTH_PROBE_TIMEOUT_MS)),
+    Effect.timeoutOption(Duration.millis(CODEX_AUTH_PROBE_TIMEOUT_MS)),
     Effect.result,
   );
 

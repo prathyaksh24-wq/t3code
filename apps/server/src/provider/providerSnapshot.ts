@@ -21,6 +21,10 @@ import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 export const DEFAULT_TIMEOUT_MS = 4_000;
 // Auth status checks involve disk/network lookups and can be slow on first run (especially Windows)
 export const AUTH_PROBE_TIMEOUT_MS = 10_000;
+// Codex starts a separate app-server process for its health probe. On Windows,
+// a cold app-server launch can exceed the shared provider timeout while still
+// completing normally, so give that probe its own startup margin.
+export const CODEX_AUTH_PROBE_TIMEOUT_MS = 30_000;
 
 export interface CommandResult {
   readonly stdout: string;
