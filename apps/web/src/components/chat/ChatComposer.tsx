@@ -42,7 +42,11 @@ import {
   replaceTextRange,
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
-import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import {
+  deriveComposerSendState,
+  readFileAsDataUrl,
+  type ComposerRunState,
+} from "../ChatView.logic";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
@@ -389,6 +393,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
     isComplete: boolean;
   } | null;
   isRunning: boolean;
+  isStopping: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -415,6 +420,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         compact={props.compact}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
+        isStopping={props.isStopping}
         showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
         promptHasText={props.promptHasText}
         isSendBusy={props.isSendBusy}
@@ -496,8 +502,10 @@ export interface ChatComposerProps {
 
   // Session phase
   phase: SessionPhase;
+  runState: ComposerRunState;
   isConnecting: boolean;
   isSendBusy: boolean;
+  isStopping: boolean;
   isPreparingWorktree: boolean;
   environmentUnavailable: {
     readonly label: string;
@@ -607,8 +615,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
+    runState,
     isConnecting,
     isSendBusy,
+    isStopping,
     isPreparingWorktree,
     environmentUnavailable,
     activePendingApproval,
@@ -1225,9 +1235,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
   const collapsedComposerPrimaryActionDisabled =
-    phase === "running" ||
+    runState === "streaming" ||
+    runState === "stopping" ||
     isSendBusy ||
     isConnecting ||
+    isStopping ||
     noProviderAvailable ||
     projectSelectionRequired ||
     environmentUnavailable !== null ||
@@ -1774,7 +1786,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       isConnecting ||
       noProviderAvailable ||
       environmentUnavailable !== null ||
-      phase === "running"
+      runState === "streaming" ||
+      runState === "stopping"
     ) {
       return false;
     }
@@ -1791,7 +1804,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isMobileViewport,
     isSendBusy,
     noProviderAvailable,
-    phase,
+    runState,
     showPlanFollowUpPrompt,
   ]);
 
@@ -2582,6 +2595,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onSubmit={submitComposer}
       className="mx-auto w-full min-w-0 max-w-3xl"
       data-chat-composer-form="true"
+      data-chat-composer-state={runState}
+      data-chat-composer-running={runState === "streaming" ? "true" : "false"}
+      data-chat-composer-stopping={runState === "stopping" ? "true" : "false"}
+      aria-busy={runState === "sending" || runState === "streaming" || runState === "stopping"}
     >
       <div
         className={cn(
@@ -3119,12 +3136,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
+                <span className="sr-only" role="status" aria-live="polite">
+                  {runState === "sending"
+                    ? "Sending message"
+                    : runState === "streaming"
+                      ? "Streaming response"
+                      : runState === "stopping"
+                        ? "Stopping response"
+                        : runState === "failed"
+                          ? "Message failed"
+                          : runState === "completed"
+                            ? "Response completed"
+                            : "Ready"}
+                </span>
                 <ComposerFooterPrimaryActions
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}
                   activeThreadProviderDisplayName={activeThreadProviderDisplayName}
                   pendingAction={pendingPrimaryAction}
-                  isRunning={phase === "running"}
+                  isRunning={runState === "streaming"}
+                  isStopping={isStopping}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}

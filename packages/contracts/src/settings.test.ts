@@ -167,6 +167,18 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   });
 });
 
+describe("ServerSettings assistant streaming", () => {
+  it("defaults assistant output to streaming", () => {
+    expect(decodeServerSettings({}).enableAssistantStreaming).toBe(true);
+  });
+
+  it("preserves an explicit buffered delivery setting", () => {
+    expect(decodeServerSettings({ enableAssistantStreaming: false }).enableAssistantStreaming).toBe(
+      false,
+    );
+  });
+});
+
 describe("ServerSettings worktree defaults", () => {
   it("defaults start-from-origin on for legacy configs", () => {
     expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true);

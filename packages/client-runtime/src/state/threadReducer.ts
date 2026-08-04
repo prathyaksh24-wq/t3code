@@ -235,6 +235,7 @@ export function applyThreadDetailEvent(
           : {}),
         turnId: event.payload.turnId,
         streaming: event.payload.streaming,
+        sequence: event.sequence,
         createdAt: event.payload.createdAt,
         updatedAt: event.payload.updatedAt,
       };
@@ -252,6 +253,7 @@ export function applyThreadDetailEvent(
                       ? message.text
                       : entry.text,
                   streaming: message.streaming,
+                  sequence: entry.sequence ?? message.sequence,
                   ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
                   ...(message.streaming ? {} : { updatedAt: message.updatedAt }),
                   ...(message.attachments !== undefined
