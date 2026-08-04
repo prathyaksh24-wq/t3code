@@ -63,6 +63,8 @@ export type WorkLogToolLifecycleStatus =
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
+  /** Event-store sequence for ordering tool/command rows with messages. */
+  sequence?: number;
   turnId?: TurnId | null;
   label: string;
   detail?: string;
@@ -124,18 +126,21 @@ export type TimelineEntry =
       id: string;
       kind: "message";
       createdAt: string;
+      sequence?: number;
       message: ChatMessage;
     }
   | {
       id: string;
       kind: "proposed-plan";
       createdAt: string;
+      sequence?: number;
       proposedPlan: ProposedPlan;
     }
   | {
       id: string;
       kind: "work";
       createdAt: string;
+      sequence?: number;
       entry: WorkLogEntry;
     };
 
@@ -707,6 +712,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
+    ...(activity.sequence !== undefined ? { sequence: activity.sequence } : {}),
     turnId: activity.turnId,
     label: taskLabel || activity.summary,
     tone:
@@ -818,9 +824,11 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  const sequence = previous.sequence ?? next.sequence;
   return {
     ...previous,
     ...next,
+    ...(sequence !== undefined ? { sequence } : {}),
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
@@ -1346,6 +1354,7 @@ export function deriveTimelineEntries(
     id: message.id,
     kind: "message",
     createdAt: message.createdAt,
+    ...(message.sequence !== undefined ? { sequence: message.sequence } : {}),
     message,
   }));
   const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
@@ -1358,11 +1367,33 @@ export function deriveTimelineEntries(
     id: entry.id,
     kind: "work",
     createdAt: entry.createdAt,
+    ...(entry.sequence !== undefined ? { sequence: entry.sequence } : {}),
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
+  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted(compareTimelineEntries);
+}
+
+function compareTimelineEntries(left: TimelineEntry, right: TimelineEntry): number {
+  if (left.sequence !== undefined && right.sequence !== undefined) {
+    if (left.sequence !== right.sequence) {
+      return left.sequence - right.sequence;
+    }
+  }
+
+  const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
+  if (createdAtComparison !== 0) {
+    return createdAtComparison;
+  }
+
+  // Legacy rows may not carry a sequence. If timestamps tie, prefer the row
+  // with a sequence and finish with a stable id tie-breaker.
+  if (left.sequence !== undefined && right.sequence === undefined) {
+    return -1;
+  }
+  if (left.sequence === undefined && right.sequence !== undefined) {
+    return 1;
+  }
+  return left.id.localeCompare(right.id);
 }
 
 export function inferCheckpointTurnCountByTurnId(

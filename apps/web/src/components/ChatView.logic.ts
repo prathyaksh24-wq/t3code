@@ -26,6 +26,45 @@ export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
+export type ComposerRunState =
+  | "ready"
+  | "sending"
+  | "streaming"
+  | "stopping"
+  | "failed"
+  | "completed";
+
+/**
+ * Keeps the composer status driven by the same session state that drives the
+ * timeline. This is intentionally a small derived state machine so the UI
+ * cannot leave a spinner or pulse running after a turn has settled.
+ */
+export function deriveComposerRunState(input: {
+  phase: SessionPhase;
+  isSendBusy: boolean;
+  isConnecting: boolean;
+  isStopping: boolean;
+  threadError: string | null;
+  latestTurn: Thread["latestTurn"];
+}): ComposerRunState {
+  if (input.isStopping) {
+    return "stopping";
+  }
+  if (input.threadError !== null || input.latestTurn?.state === "error") {
+    return "failed";
+  }
+  if (input.isConnecting || input.isSendBusy) {
+    return "sending";
+  }
+  if (input.phase === "running" || input.latestTurn?.state === "running") {
+    return "streaming";
+  }
+  if (input.latestTurn?.state === "completed" || input.latestTurn?.state === "interrupted") {
+    return "completed";
+  }
+  return "ready";
+}
+
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
 export function startNewThreadForProject(

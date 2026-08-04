@@ -17,6 +17,7 @@ import {
   buildThreadTurnInterruptInput,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  deriveComposerRunState,
   dismissBranchMismatchForSession,
   getStartedThreadModelChangeBlockReason,
   hasServerAcknowledgedLocalDispatch,
@@ -207,6 +208,47 @@ describe("deriveComposerSendState", () => {
         elementContextCount: 0,
       }).hasSendableContent,
     ).toBe(false);
+  });
+});
+
+describe("deriveComposerRunState", () => {
+  it.each([
+    ["ready", { phase: "ready", isSendBusy: false, isConnecting: false, isStopping: false }],
+    ["sending", { phase: "ready", isSendBusy: true, isConnecting: false, isStopping: false }],
+    ["sending", { phase: "connecting", isSendBusy: false, isConnecting: true, isStopping: false }],
+    ["streaming", { phase: "running", isSendBusy: false, isConnecting: false, isStopping: false }],
+    ["stopping", { phase: "running", isSendBusy: false, isConnecting: false, isStopping: true }],
+    [
+      "failed",
+      {
+        phase: "ready",
+        isSendBusy: false,
+        isConnecting: false,
+        isStopping: false,
+        threadError: "failed",
+      },
+    ],
+    [
+      "completed",
+      {
+        phase: "ready",
+        isSendBusy: false,
+        isConnecting: false,
+        isStopping: false,
+        latestTurn: completedTurn,
+      },
+    ],
+  ] as const)("derives %s", (expected, state) => {
+    expect(
+      deriveComposerRunState({
+        phase: state.phase,
+        isSendBusy: state.isSendBusy,
+        isConnecting: state.isConnecting,
+        isStopping: state.isStopping,
+        threadError: "threadError" in state ? state.threadError : null,
+        latestTurn: "latestTurn" in state ? state.latestTurn : null,
+      }),
+    ).toBe(expected);
   });
 });
 

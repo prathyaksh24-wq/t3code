@@ -1537,6 +1537,45 @@ describe("deriveTimelineEntries", () => {
       },
     });
   });
+
+  it("uses event sequences to keep streamed messages interleaved with work", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("assistant-4"),
+          role: "assistant",
+          text: "done",
+          createdAt: "2026-02-23T00:00:04.000Z",
+          turnId: TurnId.make("turn-1"),
+          updatedAt: "2026-02-23T00:00:04.000Z",
+          streaming: false,
+          sequence: 4,
+        },
+        {
+          id: MessageId.make("user-2"),
+          role: "user",
+          text: "run it",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          turnId: null,
+          updatedAt: "2026-02-23T00:00:02.000Z",
+          streaming: false,
+          sequence: 2,
+        },
+      ],
+      [],
+      [
+        {
+          id: "tool-3",
+          createdAt: "2026-02-23T00:00:01.000Z",
+          sequence: 3,
+          label: "Ran command",
+          tone: "tool",
+        },
+      ],
+    );
+
+    expect(entries.map((entry) => entry.id)).toEqual(["user-2", "tool-3", "assistant-4"]);
+  });
 });
 
 describe("deriveWorkLogEntries context window handling", () => {

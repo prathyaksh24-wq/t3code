@@ -19,6 +19,7 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
+  isStopping?: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -58,6 +59,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   isRunning,
+  isStopping = false,
   showPlanFollowUpPrompt,
   promptHasText,
   isSendBusy,
@@ -126,6 +128,19 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           })}
         </Button>
       </div>
+    );
+  }
+
+  if (isStopping) {
+    return (
+      <button
+        type="button"
+        className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground shadow-xs sm:h-8 sm:w-8"
+        disabled
+        aria-label="Stopping generation"
+      >
+        <Spinner className="size-3.5" aria-hidden="true" />
+      </button>
     );
   }
 

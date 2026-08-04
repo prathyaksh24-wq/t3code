@@ -377,6 +377,26 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     padding-inline-end: calc(env(safe-area-inset-right) + 0.75rem);
   }
 
+  @keyframes t3-chat-composer-streaming-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent);
+    }
+    50% {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+    }
+  }
+
+  [data-chat-composer-form="true"][data-chat-composer-running="true"] {
+    animation: t3-chat-composer-streaming-pulse 1.8s steps(8, end) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-chat-composer-form="true"][data-chat-composer-running="true"] {
+      animation: none;
+    }
+  }
+
   .chat-composer-glass {
     background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));

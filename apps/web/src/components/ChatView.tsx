@@ -149,6 +149,7 @@ import {
   CheckCircle2Icon,
   ChevronDownIcon,
   GitBranchIcon,
+  InfoIcon,
   TriangleAlertIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -265,6 +266,7 @@ import {
   type LocalDispatchSnapshot,
   PullRequestDialogState,
   cloneComposerImageForRetry,
+  deriveComposerRunState,
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
@@ -1259,6 +1261,7 @@ function ChatViewContent(props: ChatViewProps) {
     Record<string, LocalThreadErrorEntry>
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
+  const [isInterrupting, setIsInterrupting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
@@ -1633,6 +1636,21 @@ function ChatViewContent(props: ChatViewProps) {
   // Compute the list of environments this logical project spans, used to
   // drive the environment picker in BranchToolbar.
   const allProjects = useProjects();
+  // General chats still have a managed project backing them on the server,
+  // but the project picker is intentionally absent from that route. Resolve
+  // the backing record for send/bootstrap only; project-specific controls
+  // continue to use activeProject and remain unavailable when appropriate.
+  const activeSendProject =
+    activeProject ??
+    (activeThread
+      ? (allProjects.find(
+          (project) =>
+            project.environmentId === activeThread.environmentId &&
+            project.id === activeThread.projectId,
+        ) ??
+        fallbackDraftProject ??
+        null)
+      : fallbackDraftProject);
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
@@ -2043,7 +2061,21 @@ function ChatViewContent(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const composerRunState = deriveComposerRunState({
+    phase,
+    isSendBusy,
+    isConnecting,
+    isStopping: isInterrupting,
+    threadError,
+    latestTurn: activeLatestTurn,
+  });
+  const isWorking =
+    phase === "running" || isSendBusy || isConnecting || isInterrupting || isRevertingCheckpoint;
+  useEffect(() => {
+    if (phase !== "running") {
+      setIsInterrupting(false);
+    }
+  }, [phase]);
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -2401,6 +2433,20 @@ function ChatViewContent(props: ChatViewProps) {
   )
     ? activeProviderStatus
     : null;
+  const providerResumeNotice = useMemo<ComposerBannerStackItem | null>(() => {
+    const resumeCapability = activeProviderStatus?.runtimeCapabilities?.sessionResume;
+    if (!activeThread || !activeProviderStatus || resumeCapability?.support !== "unsupported") {
+      return null;
+    }
+    const providerName = activeProviderStatus.displayName?.trim() || activeProviderStatus.driver;
+    return {
+      id: `resume-unsupported:${activeProviderStatus.instanceId}:${activeThread.id}`,
+      variant: "info",
+      icon: <InfoIcon />,
+      title: `${providerName} starts a new provider session for the next turn`,
+      description: `${resumeCapability.reason} This thread's Vellum history remains available.`,
+    };
+  }, [activeProviderStatus, activeThread]);
   const hasTimelineTopBanner = Boolean(threadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
@@ -4127,11 +4173,13 @@ function ChatViewContent(props: ChatViewProps) {
   }, [gitStatusQuery.data?.hasWorkingTreeChanges, handleSwitchCheckoutToThread]);
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
+    const resumeItems = providerResumeNotice === null ? [] : [providerResumeNotice];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
-      return [...systemComposerBannerItems, ...parkedThreadItems];
+      return [...systemComposerBannerItems, ...resumeItems, ...parkedThreadItems];
     }
     return [
       ...systemComposerBannerItems,
+      ...resumeItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
         variant: "info",
@@ -4179,6 +4227,7 @@ function ChatViewContent(props: ChatViewProps) {
     isRestoringThreadBranch,
     localCheckoutBranchMismatch,
     parkedThreadBannerItem,
+    providerResumeNotice,
     showBranchMismatchBanner,
     systemComposerBannerItems,
   ]);
@@ -4471,6 +4520,7 @@ function ChatViewContent(props: ChatViewProps) {
       !activeThread ||
       isSendBusy ||
       isConnecting ||
+      isInterrupting ||
       activeEnvironmentUnavailable ||
       sendInFlightRef.current
     )
@@ -4553,12 +4603,12 @@ function ChatViewContent(props: ChatViewProps) {
       }
       return;
     }
-    if (!activeProject) {
+    if (!activeSendProject) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
-          title: "Choose a project first",
-          description: "This draft no longer points to an available project.",
+          title: "Workspace is unavailable",
+          description: "Reconnect the workspace before sending this message.",
         }),
       );
       return;
@@ -4707,7 +4757,7 @@ function ChatViewContent(props: ChatViewProps) {
     const title = truncate(titleSeed);
     const threadCreateModelSelection = createModelSelection(
       ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
+      ctxSelectedModel || activeSendProject.defaultModelSelection?.model || DEFAULT_MODEL,
       ctxSelectedModelSelection.options,
     );
 
@@ -4755,7 +4805,7 @@ function ChatViewContent(props: ChatViewProps) {
               ...(isLocalDraftThread
                 ? {
                     createThread: {
-                      projectId: activeProject.id,
+                      projectId: activeSendProject.id,
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
@@ -4769,7 +4819,7 @@ function ChatViewContent(props: ChatViewProps) {
               ...(baseBranchForWorktree
                 ? {
                     prepareWorktree: {
-                      projectCwd: activeProject.workspaceRoot,
+                      projectCwd: activeSendProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
@@ -4859,12 +4909,14 @@ function ChatViewContent(props: ChatViewProps) {
   };
 
   const onInterrupt = async () => {
-    if (!activeThread) return;
+    if (!activeThread || isInterrupting) return;
+    setIsInterrupting(true);
     const result = await interruptThreadTurn({
       environmentId,
       input: buildThreadTurnInterruptInput(activeThread),
     });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      setIsInterrupting(false);
       const error = squashAtomCommandFailure(result);
       setThreadError(
         activeThread.id,
@@ -5827,10 +5879,14 @@ function ChatViewContent(props: ChatViewProps) {
                             isServerThread={isServerThread}
                             isLocalDraftThread={isLocalDraftThread}
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
-                            projectSelectionRequired={isLocalDraftThread && activeProject === null}
+                            projectSelectionRequired={
+                              isLocalDraftThread && activeSendProject === null
+                            }
                             phase={phase}
+                            runState={composerRunState}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
+                            isStopping={isInterrupting}
                             isPreparingWorktree={isPreparingWorktree}
                             environmentUnavailable={activeEnvironmentUnavailableState}
                             activePendingApproval={activePendingApproval}
@@ -5853,7 +5909,7 @@ function ChatViewContent(props: ChatViewProps) {
                             lockedProvider={lockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
                             activeProjectDefaultModelSelection={
-                              activeProject?.defaultModelSelection
+                              activeSendProject?.defaultModelSelection
                             }
                             activeThreadModelSelection={activeThread?.modelSelection}
                             activeThreadActivities={activeThread?.activities}
