@@ -137,6 +137,16 @@ export const ProviderApprovalDecision = Schema.Literals([
   "cancel",
 ]);
 export type ProviderApprovalDecision = typeof ProviderApprovalDecision.Type;
+
+/** Stable outcome used when an approval request is resolved or expires. */
+export const ApprovalResolutionOutcome = Schema.Literals([
+  "approved",
+  "denied",
+  "cancelled",
+  "timed_out",
+  "runtime_terminated",
+]);
+export type ApprovalResolutionOutcome = typeof ApprovalResolutionOutcome.Type;
 export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unknown);
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 
@@ -1381,6 +1391,9 @@ export type ProjectionPendingApprovalStatus = typeof ProjectionPendingApprovalSt
 
 export const ProjectionPendingApprovalDecision = Schema.NullOr(ProviderApprovalDecision);
 export type ProjectionPendingApprovalDecision = typeof ProjectionPendingApprovalDecision.Type;
+
+export const ProjectionPendingApprovalOutcome = Schema.NullOr(ApprovalResolutionOutcome);
+export type ProjectionPendingApprovalOutcome = typeof ProjectionPendingApprovalOutcome.Type;
 
 export const DispatchResult = Schema.Struct({
   sequence: NonNegativeInt,

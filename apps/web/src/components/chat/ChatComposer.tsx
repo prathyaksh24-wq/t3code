@@ -91,10 +91,9 @@ import {
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
-import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
+import { ComposerPendingApprovalQueue } from "./ComposerPendingApprovalQueue";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
-import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
@@ -2645,9 +2644,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           {!isComposerCollapsedMobile &&
             (activePendingApproval ? (
               <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPendingApprovalPanel
-                  approval={activePendingApproval}
-                  pendingCount={pendingApprovals.length}
+                <ComposerPendingApprovalQueue
+                  approvals={pendingApprovals}
+                  respondingRequestIds={respondingRequestIds}
+                  onRespondToApproval={onRespondToApproval}
                 />
               </div>
             ) : pendingUserInputs.length > 0 ? (
@@ -2675,17 +2675,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               className="rounded-t-[19px] border-b border-border/65 bg-muted/20"
               data-chat-composer-collapsed-controls="true"
             >
-              <ComposerPendingApprovalPanel
-                approval={activePendingApproval}
-                pendingCount={pendingApprovals.length}
+              <ComposerPendingApprovalQueue
+                approvals={pendingApprovals}
+                respondingRequestIds={respondingRequestIds}
+                onRespondToApproval={onRespondToApproval}
               />
-              <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-3 sm:px-4">
-                <ComposerPendingApprovalActions
-                  requestId={activePendingApproval.requestId}
-                  isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
-                  onRespondToApproval={onRespondToApproval}
-                />
-              </div>
             </div>
           ) : isComposerCollapsedMobile && pendingUserInputs.length > 0 ? (
             <div
@@ -3032,15 +3026,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           </div>
 
           {/* Bottom toolbar */}
-          {isComposerCollapsedMobile ? null : activePendingApproval ? (
-            <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
-              <ComposerPendingApprovalActions
-                requestId={activePendingApproval.requestId}
-                isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
-                onRespondToApproval={onRespondToApproval}
-              />
-            </div>
-          ) : (
+          {isComposerCollapsedMobile ? null : activePendingApproval ? null : (
             <div
               data-chat-composer-footer="true"
               data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}

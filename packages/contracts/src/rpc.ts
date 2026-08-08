@@ -114,6 +114,8 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ServerDiagnosticsExport,
+  ServerDiagnosticsExportError,
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
@@ -214,6 +216,7 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
+  serverExportDiagnostics: "server.exportDiagnostics",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
 
@@ -315,6 +318,12 @@ export const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetPro
   payload: Schema.Struct({}),
   success: ServerProcessDiagnosticsResult,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsServerExportDiagnosticsRpc = Rpc.make(WS_METHODS.serverExportDiagnostics, {
+  payload: Schema.Struct({}),
+  success: ServerDiagnosticsExport,
+  error: Schema.Union([ServerDiagnosticsExportError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
@@ -703,6 +712,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerExportDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
   WsCloudGetRelayClientStatusRpc,

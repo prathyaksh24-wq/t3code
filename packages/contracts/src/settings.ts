@@ -410,6 +410,41 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const DEFAULT_ORCHESTRATION_MAX_CONCURRENT_RUNS = 4;
+export const DEFAULT_ORCHESTRATION_MAX_DURATION_MS = 30 * 60 * 1_000;
+export const DEFAULT_ORCHESTRATION_MAX_TOKENS = 200_000;
+export const DEFAULT_ORCHESTRATION_APPROVAL_TIMEOUT_MS = 10 * 60 * 1_000;
+
+const OrchestrationMaxConcurrentRuns = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 16 }),
+);
+const OrchestrationMaxDurationMs = Schema.Int.check(
+  Schema.isBetween({ minimum: 1_000, maximum: 24 * 60 * 60 * 1_000 }),
+);
+const OrchestrationMaxTokens = Schema.Int.check(
+  Schema.isBetween({ minimum: 1_000, maximum: 10_000_000 }),
+);
+const OrchestrationApprovalTimeoutMs = Schema.Int.check(
+  Schema.isBetween({ minimum: 1_000, maximum: 24 * 60 * 60 * 1_000 }),
+);
+
+/** Server-side guardrails for provider work started by the orchestration layer. */
+export const OrchestrationRunLimits = Schema.Struct({
+  maxConcurrentRuns: OrchestrationMaxConcurrentRuns.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_ORCHESTRATION_MAX_CONCURRENT_RUNS)),
+  ),
+  maxDurationMs: OrchestrationMaxDurationMs.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_ORCHESTRATION_MAX_DURATION_MS)),
+  ),
+  maxTokens: OrchestrationMaxTokens.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_ORCHESTRATION_MAX_TOKENS)),
+  ),
+  approvalTimeoutMs: OrchestrationApprovalTimeoutMs.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_ORCHESTRATION_APPROVAL_TIMEOUT_MS)),
+  ),
+});
+export type OrchestrationRunLimits = typeof OrchestrationRunLimits.Type;
+
 export const SourceControlWritingStyleMode = Schema.Literals([
   "repo_conventions",
   "conventional_commits",
@@ -484,6 +519,9 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  orchestrationRunLimits: OrchestrationRunLimits.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -602,6 +640,14 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
+    }),
+  ),
+  orchestrationRunLimits: Schema.optionalKey(
+    Schema.Struct({
+      maxConcurrentRuns: Schema.optionalKey(OrchestrationMaxConcurrentRuns),
+      maxDurationMs: Schema.optionalKey(OrchestrationMaxDurationMs),
+      maxTokens: Schema.optionalKey(OrchestrationMaxTokens),
+      approvalTimeoutMs: Schema.optionalKey(OrchestrationApprovalTimeoutMs),
     }),
   ),
   providers: Schema.optionalKey(

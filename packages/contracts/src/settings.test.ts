@@ -5,6 +5,10 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
   ClientSettingsPatch,
+  DEFAULT_ORCHESTRATION_APPROVAL_TIMEOUT_MS,
+  DEFAULT_ORCHESTRATION_MAX_CONCURRENT_RUNS,
+  DEFAULT_ORCHESTRATION_MAX_DURATION_MS,
+  DEFAULT_ORCHESTRATION_MAX_TOKENS,
   DEFAULT_SERVER_SETTINGS,
   ServerSettings,
   ServerSettingsPatch,
@@ -30,6 +34,30 @@ describe("ClientSettings word wrap", () => {
     expect(decoded.wordWrap).toBe(true);
     expect(decoded).not.toHaveProperty("chatWordWrap");
     expect(decoded).not.toHaveProperty("diffWordWrap");
+  });
+});
+
+describe("ServerSettings orchestration run limits", () => {
+  it("decodes safe defaults", () => {
+    expect(decodeServerSettings({}).orchestrationRunLimits).toEqual({
+      maxConcurrentRuns: DEFAULT_ORCHESTRATION_MAX_CONCURRENT_RUNS,
+      maxDurationMs: DEFAULT_ORCHESTRATION_MAX_DURATION_MS,
+      maxTokens: DEFAULT_ORCHESTRATION_MAX_TOKENS,
+      approvalTimeoutMs: DEFAULT_ORCHESTRATION_APPROVAL_TIMEOUT_MS,
+    });
+  });
+
+  it("accepts a partial limits patch and rejects unsafe values", () => {
+    expect(
+      decodeServerSettingsPatch({
+        orchestrationRunLimits: { maxConcurrentRuns: 8 },
+      }).orchestrationRunLimits?.maxConcurrentRuns,
+    ).toBe(8);
+    expect(() =>
+      decodeServerSettingsPatch({
+        orchestrationRunLimits: { maxConcurrentRuns: 0 },
+      }),
+    ).toThrow();
   });
 });
 

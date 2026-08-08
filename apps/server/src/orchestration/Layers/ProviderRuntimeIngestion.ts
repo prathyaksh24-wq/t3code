@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
+  EventId,
   MessageId,
   type OrchestrationEvent,
   type OrchestrationMessage,
@@ -20,6 +21,7 @@ import {
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -263,6 +265,22 @@ function normalizeRuntimeTurnState(
   }
 }
 
+function approvalResolutionOutcomeFromDecision(
+  decision: string | undefined,
+): "approved" | "denied" | "cancelled" | undefined {
+  switch (decision) {
+    case "accept":
+    case "acceptForSession":
+      return "approved";
+    case "decline":
+      return "denied";
+    case "cancel":
+      return "cancelled";
+    default:
+      return undefined;
+  }
+}
+
 function orchestrationSessionStatusFromRuntimeState(
   state: "starting" | "running" | "waiting" | "ready" | "interrupted" | "stopped" | "error",
 ): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" {
@@ -304,6 +322,56 @@ function requestKindFromCanonicalRequestType(
     default:
       return undefined;
   }
+}
+
+function activityPayloadRecord(payload: unknown): Record<string, unknown> | null {
+  return typeof payload === "object" && payload !== null
+    ? (payload as Record<string, unknown>)
+    : null;
+}
+
+function hasPendingApprovalActivity(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  requestId: string,
+): boolean {
+  let pending = false;
+  const ordered = [...activities].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
+  for (const activity of ordered) {
+    const payload = activityPayloadRecord(activity.payload);
+    if (payload?.requestId !== requestId) continue;
+    if (activity.kind === "approval.requested") pending = true;
+    if (activity.kind === "approval.resolved") pending = false;
+    if (
+      activity.kind === "provider.approval.respond.failed" &&
+      typeof payload.detail === "string" &&
+      /stale pending approval request|unknown pending approval request|unknown pending permission request/i.test(
+        payload.detail,
+      )
+    ) {
+      pending = false;
+    }
+  }
+  return pending;
+}
+
+function hasCancellationMarker(
+  thread: OrchestrationThread,
+  eventTurnId: TurnId | undefined,
+): boolean {
+  if (thread.session?.status === "interrupted" && eventTurnId === undefined) {
+    return true;
+  }
+  return thread.activities.some((activity) => {
+    if (activity.kind !== "turn.cancellation.requested" && activity.kind !== "turn.cancelled") {
+      return false;
+    }
+    return (
+      eventTurnId === undefined || (activity.turnId !== null && activity.turnId === eventTurnId)
+    );
+  });
 }
 
 export function runtimeEventToActivities(
@@ -365,12 +433,67 @@ export function runtimeEventToActivities(
             ...(requestKind ? { requestKind } : {}),
             requestType: event.payload.requestType,
             ...(event.payload.decision ? { decision: event.payload.decision } : {}),
+            ...(approvalResolutionOutcomeFromDecision(event.payload.decision)
+              ? { outcome: approvalResolutionOutcomeFromDecision(event.payload.decision) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
       ];
     }
+
+    case "turn.completed": {
+      const state = normalizeRuntimeTurnState(event.payload.state);
+      const outcome =
+        state === "failed"
+          ? "runtime_terminated"
+          : state === "cancelled" || state === "interrupted"
+            ? "cancelled"
+            : "completed";
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: state === "failed" ? "error" : "info",
+          kind: "turn.terminated",
+          summary:
+            state === "failed"
+              ? "Runtime terminated the turn"
+              : state === "cancelled" || state === "interrupted"
+                ? "Turn cancelled"
+                : "Turn completed",
+          payload: {
+            state,
+            outcome,
+            ...(event.payload.stopReason ? { stopReason: event.payload.stopReason } : {}),
+            ...(event.payload.errorMessage
+              ? { detail: truncateDetail(event.payload.errorMessage) }
+              : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "turn.aborted":
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "turn.terminated",
+          summary: "Turn cancelled",
+          payload: {
+            state: "interrupted",
+            outcome: "cancelled",
+            detail: truncateDetail(event.payload.reason),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
 
     case "runtime.error": {
       return [
@@ -736,6 +859,13 @@ const make = Effect.gen(function* () {
     timeToLive: TASK_DESCRIPTION_BY_TASK_TTL,
     lookup: () => Effect.succeed(""),
   });
+  const triggeredTurnLimits = yield* Cache.make<string, true>({
+    capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
+    timeToLive: TURN_MESSAGE_IDS_BY_TURN_TTL,
+    lookup: () => Effect.succeed(true),
+  });
+  const scheduledTurnDurationKeys = new Set<string>();
+  const scheduledApprovalTimeoutKeys = new Set<string>();
 
   const rememberTaskDescription = (threadId: ThreadId, taskId: string, description: string) =>
     Cache.set(taskDescriptionByTaskKey, providerTaskKey(threadId, taskId), description);
@@ -761,6 +891,209 @@ const make = Effect.gen(function* () {
       .getThreadShellById(threadId)
       .pipe(Effect.map(Option.getOrUndefined));
   });
+
+  const appendRuntimeActivity = (input: {
+    readonly event: ProviderRuntimeEvent;
+    readonly threadId: ThreadId;
+    readonly activity: OrchestrationThreadActivity;
+    readonly commandTag: string;
+  }) =>
+    providerCommandMetadata(input.event, input.commandTag).pipe(
+      Effect.flatMap((commandMetadata) =>
+        orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          ...commandMetadata,
+          threadId: input.threadId,
+          activity: input.activity,
+          createdAt: input.activity.createdAt,
+        }),
+      ),
+    );
+
+  const claimTurnLimit = (key: string) =>
+    Cache.getOption(triggeredTurnLimits, key).pipe(
+      Effect.flatMap((existing) =>
+        Option.match(existing, {
+          onNone: () => Cache.set(triggeredTurnLimits, key, true).pipe(Effect.as(true)),
+          onSome: () => Effect.succeed(false),
+        }),
+      ),
+    );
+
+  const triggerTurnLimit = Effect.fn("triggerTurnLimit")(function* (input: {
+    readonly event: ProviderRuntimeEvent;
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId;
+    readonly limit: "maxDurationMs" | "maxTokens";
+    readonly observed: number;
+  }) {
+    const thread = yield* resolveThreadShell(input.threadId);
+    if (
+      !thread ||
+      thread.session === null ||
+      (thread.session.status !== "starting" && thread.session.status !== "running") ||
+      thread.session.activeTurnId !== input.turnId
+    ) {
+      return;
+    }
+    if (!(yield* claimTurnLimit(providerTurnKey(input.threadId, input.turnId)))) {
+      return;
+    }
+
+    const limits = (yield* serverSettingsService.getSettings).orchestrationRunLimits;
+    const configured = limits[input.limit];
+    const detail = `${input.limit} limit reached (${configured}; observed ${input.observed}).`;
+    yield* orchestrationEngine.dispatch({
+      type: "thread.session.set",
+      ...(yield* providerCommandMetadata(input.event, "turn-limit-session-set")),
+      threadId: input.threadId,
+      session: {
+        threadId: input.threadId,
+        status: "interrupted",
+        providerName: thread.session.providerName,
+        ...(thread.session.providerInstanceId !== undefined
+          ? { providerInstanceId: thread.session.providerInstanceId }
+          : {}),
+        runtimeMode: thread.session.runtimeMode,
+        activeTurnId: null,
+        lastError: detail,
+        updatedAt: input.event.createdAt,
+      },
+      createdAt: input.event.createdAt,
+    });
+    yield* appendRuntimeActivity({
+      event: input.event,
+      threadId: input.threadId,
+      commandTag: "turn-limit-activity",
+      activity: {
+        id: yield* crypto.randomUUIDv4.pipe(Effect.map(EventId.make)),
+        createdAt: input.event.createdAt,
+        tone: "error",
+        kind: "turn.limit.exceeded",
+        summary: "Run stopped by a safety limit",
+        payload: {
+          limit: input.limit,
+          configured,
+          observed: input.observed,
+          outcome: "runtime_terminated",
+        },
+        turnId: input.turnId,
+      },
+    });
+
+    yield* providerService.interruptTurn({ threadId: input.threadId }).pipe(
+      Effect.catchCause((interruptCause) =>
+        providerService.stopSession({ threadId: input.threadId }).pipe(
+          Effect.catchCause((stopCause) =>
+            Effect.gen(function* () {
+              const activityId = yield* crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
+              return yield* appendRuntimeActivity({
+                event: input.event,
+                threadId: input.threadId,
+                commandTag: "turn-limit-stop-failed",
+                activity: {
+                  id: activityId,
+                  createdAt: input.event.createdAt,
+                  tone: "error",
+                  kind: "turn.limit.interrupt.failed",
+                  summary: "Could not stop the limited run",
+                  payload: {
+                    detail: `${Cause.pretty(interruptCause)}; stop fallback failed: ${Cause.pretty(stopCause)}`,
+                    limit: input.limit,
+                  },
+                  turnId: input.turnId,
+                },
+              });
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
+  const scheduleTurnDurationLimit = (event: ProviderRuntimeEvent, turnId: TurnId) => {
+    const key = providerTurnKey(event.threadId, turnId);
+    if (scheduledTurnDurationKeys.has(key)) {
+      return Effect.void;
+    }
+    scheduledTurnDurationKeys.add(key);
+    return Effect.forkScoped(
+      Effect.gen(function* () {
+        const limits = (yield* serverSettingsService.getSettings).orchestrationRunLimits;
+        yield* Effect.sleep(Duration.millis(limits.maxDurationMs));
+        yield* triggerTurnLimit({
+          event,
+          threadId: event.threadId,
+          turnId,
+          limit: "maxDurationMs",
+          observed: limits.maxDurationMs,
+        });
+      }).pipe(Effect.ensuring(Effect.sync(() => scheduledTurnDurationKeys.delete(key)))),
+    ).pipe(Effect.asVoid);
+  };
+
+  const scheduleApprovalTimeout = (
+    event: Extract<ProviderRuntimeEvent, { type: "request.opened" }>,
+  ) => {
+    const requestId = event.requestId;
+    if (requestId === undefined || event.payload.requestType === "tool_user_input") {
+      return Effect.void;
+    }
+    const key = `${event.threadId}:${requestId}`;
+    if (scheduledApprovalTimeoutKeys.has(key)) {
+      return Effect.void;
+    }
+    scheduledApprovalTimeoutKeys.add(key);
+    return Effect.forkScoped(
+      Effect.gen(function* () {
+        const limits = (yield* serverSettingsService.getSettings).orchestrationRunLimits;
+        yield* Effect.sleep(Duration.millis(limits.approvalTimeoutMs));
+        const thread = yield* resolveThreadDetail(event.threadId);
+        if (!thread || !hasPendingApprovalActivity(thread.activities, requestId)) {
+          return;
+        }
+
+        yield* providerService
+          .respondToRequest({
+            threadId: event.threadId,
+            requestId: ApprovalRequestId.make(requestId),
+            decision: "cancel",
+          })
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("provider approval timeout response failed", {
+                threadId: event.threadId,
+                requestId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+        const timedOutAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
+        yield* appendRuntimeActivity({
+          event,
+          threadId: event.threadId,
+          commandTag: "approval-timeout-activity",
+          activity: {
+            id: yield* crypto.randomUUIDv4.pipe(Effect.map(EventId.make)),
+            createdAt: timedOutAt,
+            tone: "error",
+            kind: "approval.resolved",
+            summary: "Approval timed out",
+            payload: {
+              requestId,
+              requestType: event.payload.requestType,
+              ...(requestKindFromCanonicalRequestType(event.payload.requestType)
+                ? { requestKind: requestKindFromCanonicalRequestType(event.payload.requestType) }
+                : {}),
+              decision: "cancel",
+              outcome: "timed_out",
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+          },
+        });
+      }).pipe(Effect.ensuring(Effect.sync(() => scheduledApprovalTimeoutKeys.delete(key)))),
+    ).pipe(Effect.asVoid);
+  };
 
   const rememberAssistantMessageId = (threadId: ThreadId, turnId: TurnId, messageId: MessageId) =>
     Cache.getOption(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId)).pipe(
@@ -1328,6 +1661,24 @@ const make = Effect.gen(function* () {
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
       const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined;
+      const cancellationFenceFromSession =
+        thread.session?.status === "interrupted" &&
+        (eventTurnId === undefined || activeTurnId === null || sameId(activeTurnId, eventTurnId));
+      const detailForCancellationFence =
+        !cancellationFenceFromSession && (eventTurnId === undefined || activeTurnId === null)
+          ? yield* getLoadedThreadDetail()
+          : null;
+      const cancellationFenceFromActivities =
+        !cancellationFenceFromSession && (eventTurnId === undefined || activeTurnId === null)
+          ? detailForCancellationFence !== null &&
+            hasCancellationMarker(detailForCancellationFence, eventTurnId)
+          : false;
+      const cancellationFence = cancellationFenceFromSession || cancellationFenceFromActivities;
+      // A provider can finish an older turn after the user starts a new one.
+      // Turn-scoped content from that older turn must not be appended to the
+      // new conversation, even when the provider emitted no terminal event.
+      const shouldApplyRuntimeData =
+        !STRICT_PROVIDER_LIFECYCLE_GUARD || (!cancellationFence && !conflictsWithActiveTurn);
 
       // A turn.started that conflicts with the active turn is legitimate when
       // the server itself has a turn start pending for this thread AND the
@@ -1344,6 +1695,9 @@ const make = Effect.gen(function* () {
       const shouldApplyThreadLifecycle = (() => {
         if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
           return true;
+        }
+        if (cancellationFence) {
+          return false;
         }
         switch (event.type) {
           case "session.exited":
@@ -1470,6 +1824,48 @@ const make = Effect.gen(function* () {
         }
       }
 
+      if (shouldApplyRuntimeData && event.type === "turn.started" && eventTurnId !== undefined) {
+        yield* scheduleTurnDurationLimit(event, eventTurnId);
+      }
+      if (
+        shouldApplyRuntimeData &&
+        event.type === "thread.token-usage.updated" &&
+        eventTurnId !== undefined
+      ) {
+        const limits = (yield* serverSettingsService.getSettings).orchestrationRunLimits;
+        if (event.payload.usage.usedTokens >= limits.maxTokens) {
+          yield* triggerTurnLimit({
+            event,
+            threadId: thread.id,
+            turnId: eventTurnId,
+            limit: "maxTokens",
+            observed: event.payload.usage.usedTokens,
+          });
+        }
+      }
+      if (event.type === "request.opened" && shouldApplyRuntimeData) {
+        yield* scheduleApprovalTimeout(event);
+      }
+      if (event.type === "request.resolved" && event.requestId !== undefined) {
+        scheduledApprovalTimeoutKeys.delete(`${event.threadId}:${event.requestId}`);
+      }
+      if (
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted" ||
+        event.type === "session.exited"
+      ) {
+        if (eventTurnId !== undefined) {
+          scheduledTurnDurationKeys.delete(providerTurnKey(event.threadId, eventTurnId));
+        } else {
+          const prefix = `${event.threadId}:`;
+          for (const key of scheduledTurnDurationKeys) {
+            if (key.startsWith(prefix)) {
+              scheduledTurnDurationKeys.delete(key);
+            }
+          }
+        }
+      }
+
       const assistantDelta =
         event.type === "content.delta" && event.payload.streamKind === "assistant_text"
           ? event.payload.delta
@@ -1477,7 +1873,7 @@ const make = Effect.gen(function* () {
       const proposedPlanDelta =
         event.type === "turn.proposed.delta" ? event.payload.delta : undefined;
 
-      if (assistantDelta && assistantDelta.length > 0) {
+      if (shouldApplyRuntimeData && assistantDelta && assistantDelta.length > 0) {
         const turnId = toTurnId(event.turnId);
         const assistantMessageId = yield* getOrCreateAssistantMessageId({
           threadId: thread.id,
@@ -1522,7 +1918,7 @@ const make = Effect.gen(function* () {
         event.type === "request.opened" || event.type === "user-input.requested"
           ? toTurnId(event.turnId)
           : undefined;
-      if (pauseForUserTurnId) {
+      if (shouldApplyRuntimeData && pauseForUserTurnId) {
         const detailedThread = yield* getLoadedThreadDetail();
         const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
           serverSettingsService.getSettings,
@@ -1563,7 +1959,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (proposedPlanDelta && proposedPlanDelta.length > 0) {
+      if (shouldApplyRuntimeData && proposedPlanDelta && proposedPlanDelta.length > 0) {
         const planId = proposedPlanIdFromEvent(event, thread.id);
         yield* appendBufferedProposedPlan(planId, proposedPlanDelta, now);
       }
@@ -1586,7 +1982,7 @@ const make = Effect.gen(function* () {
             }
           : undefined;
 
-      if (assistantCompletion) {
+      if (shouldApplyRuntimeData && assistantCompletion) {
         const detailedThread = yield* getLoadedThreadDetail();
         const messages = detailedThread?.messages ?? [];
         const turnId = toTurnId(event.turnId);
@@ -1638,7 +2034,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      if (proposedPlanCompletion) {
+      if (shouldApplyRuntimeData && proposedPlanCompletion) {
         const detailedThread = yield* getLoadedThreadDetail();
         yield* finalizeBufferedProposedPlan({
           event,
@@ -1651,7 +2047,10 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (event.type === "turn.completed" || event.type === "turn.aborted") {
+      if (
+        shouldApplyRuntimeData &&
+        (event.type === "turn.completed" || event.type === "turn.aborted")
+      ) {
         const detailedThread = yield* getLoadedThreadDetail();
         const messages = detailedThread?.messages ?? [];
         const proposedPlans = detailedThread?.proposedPlans ?? [];
@@ -1694,9 +2093,7 @@ const make = Effect.gen(function* () {
       if (event.type === "runtime.error") {
         const runtimeErrorMessage = event.payload.message;
 
-        const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
-          ? true
-          : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
+        const shouldApplyRuntimeError = shouldApplyRuntimeData;
 
         if (shouldApplyRuntimeError) {
           yield* orchestrationEngine.dispatch({
@@ -1720,7 +2117,11 @@ const make = Effect.gen(function* () {
         }
       }
 
-      if (event.type === "thread.metadata.updated" && event.payload.name) {
+      if (
+        shouldApplyRuntimeData &&
+        event.type === "thread.metadata.updated" &&
+        event.payload.name
+      ) {
         yield* orchestrationEngine.dispatch({
           type: "thread.meta.update",
           ...(yield* providerCommandMetadata(event, "thread-meta-update")),
@@ -1729,7 +2130,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (event.type === "turn.diff.updated") {
+      if (shouldApplyRuntimeData && event.type === "turn.diff.updated") {
         const turnId = toTurnId(event.turnId);
         const checkpointContext = turnId
           ? yield* projectionSnapshotQuery
@@ -1766,14 +2167,17 @@ const make = Effect.gen(function* () {
         }
       }
 
-      if (event.type === "task.started" || event.type === "task.progress") {
+      if (
+        shouldApplyRuntimeData &&
+        (event.type === "task.started" || event.type === "task.progress")
+      ) {
         const description = event.payload.description?.trim();
         if (description) {
           yield* rememberTaskDescription(thread.id, event.payload.taskId, description);
         }
       }
       let taskTitle: string | undefined;
-      if (event.type === "task.completed") {
+      if (shouldApplyRuntimeData && event.type === "task.completed") {
         taskTitle = yield* lookupTaskDescription(thread.id, event.payload.taskId);
         if (!taskTitle) {
           const threadDetail = yield* getLoadedThreadDetail();
@@ -1782,7 +2186,23 @@ const make = Effect.gen(function* () {
       }
 
       const activities = runtimeEventToActivities(event, taskTitle);
-      yield* Effect.forEach(activities, (activity) =>
+      const activitiesToAppend = shouldApplyRuntimeData
+        ? activities
+        : [
+            {
+              id: yield* crypto.randomUUIDv4.pipe(Effect.map(EventId.make)),
+              createdAt: now,
+              tone: "info" as const,
+              kind: "runtime.event.ignored",
+              summary: "Late provider event ignored",
+              payload: {
+                eventType: event.type,
+                reason: cancellationFence ? "cancellation-fence" : "stale-turn",
+              },
+              turnId: eventTurnId ?? null,
+            },
+          ];
+      yield* Effect.forEach(activitiesToAppend, (activity) =>
         providerCommandMetadata(event, "thread-activity-append").pipe(
           Effect.flatMap((commandMetadata) =>
             orchestrationEngine.dispatch({

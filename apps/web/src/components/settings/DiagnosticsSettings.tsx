@@ -3,6 +3,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CopyIcon,
+  DownloadIcon,
   FolderOpenIcon,
   InfoIcon,
   RefreshCwIcon,
@@ -815,6 +816,9 @@ export function DiagnosticsSettingsPanel() {
   const signalServerProcess = useAtomCommand(serverEnvironment.signalProcess, {
     reportFailure: false,
   });
+  const exportDiagnostics = useAtomCommand(serverEnvironment.exportDiagnostics, {
+    reportFailure: false,
+  });
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
   });
@@ -856,6 +860,47 @@ export function DiagnosticsSettingsPanel() {
   const [isOpeningLogsDirectory, setIsOpeningLogsDirectory] = useState(false);
   const [openLogsDirectoryError, setOpenLogsDirectoryError] = useState<string | null>(null);
   const [signalingPid, setSignalingPid] = useState<number | null>(null);
+  const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false);
+
+  const downloadDiagnostics = useCallback(() => {
+    if (environmentId === null || isExportingDiagnostics) return;
+    setIsExportingDiagnostics(true);
+    void (async () => {
+      const result = await exportDiagnostics({ environmentId, input: {} });
+      setIsExportingDiagnostics(false);
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const exportError = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: "Could not export diagnostics",
+            description:
+              exportError instanceof Error
+                ? exportError.message
+                : "The redacted diagnostics export failed.",
+          });
+        }
+        return;
+      }
+
+      const blob = new Blob([JSON.stringify(result.value, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `t3-diagnostics-${new Date().toISOString().replaceAll(":", "-")}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      toastManager.add({
+        type: "success",
+        title: "Diagnostics exported",
+        description: "The download contains aggregate data only; sensitive values were omitted.",
+      });
+    })();
+  }, [environmentId, exportDiagnostics, isExportingDiagnostics]);
 
   const openLogsDirectory = useCallback(() => {
     const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
@@ -1104,6 +1149,23 @@ export function DiagnosticsSettingsPanel() {
                 }
               />
               <TooltipPopup side="top">Open logs folder</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                    disabled={environmentId === null || isExportingDiagnostics}
+                    onClick={downloadDiagnostics}
+                    aria-label="Download redacted diagnostics"
+                  >
+                    <DownloadIcon className="size-3" />
+                  </Button>
+                }
+              />
+              <TooltipPopup side="top">Download redacted diagnostics</TooltipPopup>
             </Tooltip>
             <DiagnosticsRefreshButton
               isPending={isPending}
