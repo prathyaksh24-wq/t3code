@@ -230,12 +230,14 @@ const make = Effect.gen(function* () {
       | "provider.turn.interrupt.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
-      | "provider.session.stop.failed";
+      | "provider.session.stop.failed"
+      | "provider.turn.start.limit-exceeded";
     readonly summary: string;
     readonly detail: string;
     readonly turnId: TurnId | null;
     readonly createdAt: string;
     readonly requestId?: string;
+    readonly limit?: string;
     readonly runId?: RunId;
     readonly traceId?: TraceId;
   }) =>
@@ -256,7 +258,44 @@ const make = Effect.gen(function* () {
             payload: {
               detail: input.detail,
               ...(input.requestId ? { requestId: input.requestId } : {}),
+              ...(input.limit ? { limit: input.limit } : {}),
             },
+            turnId: input.turnId,
+            createdAt: input.createdAt,
+          },
+          createdAt: input.createdAt,
+          ...(input.runId !== undefined ? { runId: input.runId } : {}),
+          ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
+        }),
+      ),
+    );
+
+  const appendProviderActivity = (input: {
+    readonly threadId: ThreadId;
+    readonly kind: string;
+    readonly tone: "info" | "error";
+    readonly summary: string;
+    readonly payload?: Record<string, unknown>;
+    readonly turnId: TurnId | null;
+    readonly createdAt: string;
+    readonly runId?: RunId;
+    readonly traceId?: TraceId;
+  }) =>
+    Effect.all({
+      commandId: serverCommandId("provider-lifecycle-activity"),
+      eventId: serverEventId(),
+    }).pipe(
+      Effect.flatMap(({ commandId, eventId }) =>
+        orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId,
+          threadId: input.threadId,
+          activity: {
+            id: eventId,
+            tone: input.tone,
+            kind: input.kind,
+            summary: input.summary,
+            payload: input.payload ?? {},
             turnId: input.turnId,
             createdAt: input.createdAt,
           },
@@ -820,6 +859,39 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const runLimits = (yield* serverSettingsService.getSettings).orchestrationRunLimits;
+    const threadIsAlreadyRunning =
+      thread.session?.status === "starting" || thread.session?.status === "running";
+    if (!threadIsAlreadyRunning) {
+      const shell = yield* projectionSnapshotQuery.getShellSnapshot();
+      const activeRunCount = shell.threads.filter(
+        (candidate) =>
+          candidate.session?.status === "starting" || candidate.session?.status === "running",
+      ).length;
+      if (activeRunCount >= runLimits.maxConcurrentRuns) {
+        const detail = `Run concurrency limit reached (${runLimits.maxConcurrentRuns}). Stop an active run before starting another.`;
+        yield* setThreadSessionErrorOnTurnStartFailure({
+          threadId: event.payload.threadId,
+          detail,
+          createdAt: event.payload.createdAt,
+          ...(event.metadata.runId !== undefined ? { runId: event.metadata.runId } : {}),
+          ...(event.metadata.traceId !== undefined ? { traceId: event.metadata.traceId } : {}),
+        });
+        yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.turn.start.limit-exceeded",
+          summary: "Run limit reached",
+          detail,
+          limit: "maxConcurrentRuns",
+          turnId: null,
+          createdAt: event.payload.createdAt,
+          ...(event.metadata.runId !== undefined ? { runId: event.metadata.runId } : {}),
+          ...(event.metadata.traceId !== undefined ? { traceId: event.metadata.traceId } : {}),
+        });
+        return;
+      }
+    }
+
     const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
       yield* appendProviderFailureActivity({
@@ -948,8 +1020,119 @@ const make = Effect.gen(function* () {
       });
     }
 
-    // Orchestration turn ids are not provider turn ids, so interrupt by session.
-    yield* providerService.interruptTurn({ threadId: event.payload.threadId });
+    const turnId = event.payload.turnId ?? thread.session?.activeTurnId ?? null;
+    const runId = event.metadata.runId;
+    const traceId = event.metadata.traceId;
+
+    // Persist the fence before asking the provider to stop. Provider adapters
+    // can emit a final delta or completion after interrupt is requested; the
+    // ingestion layer uses this marker to ignore those late mutations.
+    yield* appendProviderActivity({
+      threadId: thread.id,
+      kind: "turn.cancellation.requested",
+      tone: "info",
+      summary: "Turn cancellation requested",
+      payload: {
+        outcome: "cancelled",
+        source: "user",
+      },
+      turnId,
+      createdAt: event.payload.createdAt,
+      ...(runId !== undefined ? { runId } : {}),
+      ...(traceId !== undefined ? { traceId } : {}),
+    });
+    yield* setThreadSession({
+      threadId: thread.id,
+      session: {
+        threadId: thread.id,
+        status: "interrupted",
+        providerName: thread.session?.providerName ?? null,
+        ...(thread.session?.providerInstanceId !== undefined
+          ? { providerInstanceId: thread.session.providerInstanceId }
+          : {}),
+        runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: event.payload.createdAt,
+      },
+      createdAt: event.payload.createdAt,
+      ...(runId !== undefined ? { runId } : {}),
+      ...(traceId !== undefined ? { traceId } : {}),
+    });
+
+    // Orchestration turn ids are not provider turn ids, so interrupt by
+    // session. If an adapter cannot interrupt cleanly, stop the provider
+    // session so it cannot continue editing after the user cancelled.
+    yield* providerService.interruptTurn({ threadId: event.payload.threadId }).pipe(
+      Effect.flatMap(() =>
+        appendProviderActivity({
+          threadId: thread.id,
+          kind: "turn.cancelled",
+          tone: "info",
+          summary: "Turn cancelled",
+          payload: {
+            outcome: "cancelled",
+            source: "user",
+          },
+          turnId,
+          createdAt: event.payload.createdAt,
+          ...(runId !== undefined ? { runId } : {}),
+          ...(traceId !== undefined ? { traceId } : {}),
+        }),
+      ),
+      Effect.catchCause((cause) =>
+        providerService.stopSession({ threadId: event.payload.threadId }).pipe(
+          Effect.flatMap(() =>
+            Effect.all([
+              setThreadSession({
+                threadId: thread.id,
+                session: {
+                  threadId: thread.id,
+                  status: "stopped",
+                  providerName: thread.session?.providerName ?? null,
+                  ...(thread.session?.providerInstanceId !== undefined
+                    ? { providerInstanceId: thread.session.providerInstanceId }
+                    : {}),
+                  runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+                  activeTurnId: null,
+                  lastError: null,
+                  updatedAt: event.payload.createdAt,
+                },
+                createdAt: event.payload.createdAt,
+                ...(runId !== undefined ? { runId } : {}),
+                ...(traceId !== undefined ? { traceId } : {}),
+              }),
+              appendProviderActivity({
+                threadId: thread.id,
+                kind: "turn.terminated",
+                tone: "error",
+                summary: "Provider session stopped after cancellation",
+                payload: {
+                  outcome: "runtime_terminated",
+                  source: "provider-stop-fallback",
+                },
+                turnId,
+                createdAt: event.payload.createdAt,
+                ...(runId !== undefined ? { runId } : {}),
+                ...(traceId !== undefined ? { traceId } : {}),
+              }),
+            ]).pipe(Effect.asVoid),
+          ),
+          Effect.catchCause((fallbackCause) =>
+            appendProviderFailureActivity({
+              threadId: thread.id,
+              kind: "provider.turn.interrupt.failed",
+              summary: "Provider turn cancellation failed",
+              detail: `${Cause.pretty(cause)}; stop fallback failed: ${Cause.pretty(fallbackCause)}`,
+              turnId,
+              createdAt: event.payload.createdAt,
+              ...(runId !== undefined ? { runId } : {}),
+              ...(traceId !== undefined ? { traceId } : {}),
+            }),
+          ),
+        ),
+      ),
+    );
   });
 
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (

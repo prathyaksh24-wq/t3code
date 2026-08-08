@@ -40,6 +40,7 @@ import {
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
+  ServerDiagnosticsExportError,
   ProjectListEntriesError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
@@ -314,6 +315,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.serverDiscoverSourceControl, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetTraceDiagnostics, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetProcessDiagnostics, AuthOrchestrationReadScope],
+  [WS_METHODS.serverExportDiagnostics, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetProcessResourceHistory, AuthOrchestrationReadScope],
   [WS_METHODS.serverSignalProcess, AuthOrchestrationOperateScope],
   [WS_METHODS.cloudGetRelayClientStatus, AuthRelayWriteScope],
@@ -1496,6 +1498,74 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverExportDiagnostics]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverExportDiagnostics,
+            Effect.gen(function* () {
+              const [traceData, processData, shell, exportedAt] = yield* Effect.all([
+                TraceDiagnostics.readTraceDiagnostics({
+                  traceFilePath: config.serverTracePath,
+                  maxFiles: config.traceMaxFiles,
+                }),
+                processDiagnostics.read,
+                projectionSnapshotQuery.getShellSnapshot(),
+                DateTime.now,
+              ]);
+              const sessionStatusCounts: Record<string, number> = {};
+              let activeRunCount = 0;
+              let pendingApprovalCount = 0;
+              let pendingUserInputCount = 0;
+              for (const thread of shell.threads) {
+                const status = thread.session?.status ?? "none";
+                sessionStatusCounts[status] = (sessionStatusCounts[status] ?? 0) + 1;
+                if (status === "starting" || status === "running") {
+                  activeRunCount += 1;
+                }
+                if (thread.hasPendingApprovals) {
+                  pendingApprovalCount += 1;
+                }
+                if (thread.hasPendingUserInput) {
+                  pendingUserInputCount += 1;
+                }
+              }
+              return {
+                schemaVersion: "t3.diagnostics.v1" as const,
+                exportedAt,
+                redactions: [
+                  "File paths, process commands, trace IDs, causes, messages, provider arguments, and conversation content are omitted.",
+                ],
+                traces: {
+                  recordCount: traceData.recordCount,
+                  parseErrorCount: traceData.parseErrorCount,
+                  failureCount: traceData.failureCount,
+                  interruptionCount: traceData.interruptionCount,
+                  slowSpanCount: traceData.slowSpanCount,
+                },
+                processes: {
+                  processCount: processData.processCount,
+                  totalRssBytes: processData.totalRssBytes,
+                  totalCpuPercent: processData.totalCpuPercent,
+                },
+                runtime: {
+                  threadCount: shell.threads.length,
+                  activeRunCount,
+                  pendingApprovalCount,
+                  pendingUserInputCount,
+                  sessionStatusCounts,
+                },
+              };
+            }).pipe(
+              Effect.mapError(
+                () =>
+                  new ServerDiagnosticsExportError({
+                    message: "Unable to assemble the redacted diagnostics export.",
+                  }),
+              ),
+            ),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverGetProcessResourceHistory,

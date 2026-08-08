@@ -38,6 +38,22 @@ runtime exposed no selectable access mode.
 The capability value describes the installed adapter path. It does not imply that
 all models, accounts, or remote environments have identical access.
 
+## Cancellation and run safety
+
+Cancellation is persisted as a turn fence before the provider adapter is
+interrupted. Late provider deltas, tool output, plans, and completion events for
+that fenced turn are retained only as an ignored-runtime activity; they cannot
+mutate the conversation after the user stops it. If an adapter cannot interrupt
+its turn, the reactor attempts to stop the provider session and records the
+failure when both operations fail.
+
+The server also enforces per-environment limits for concurrent runs, maximum
+duration, reported token usage, and unanswered approval requests. Limits are
+stored in server settings, have bounded defaults, and produce a terminal safety
+activity when they stop a run. Approval rows persist a first-terminal outcome
+(`approved`, `denied`, `cancelled`, `timed_out`, or `runtime_terminated`) so a
+late provider callback cannot rewrite what the user saw.
+
 ## Runtime settings and credentials
 
 Provider settings keep runtime configuration separate from the selected model and

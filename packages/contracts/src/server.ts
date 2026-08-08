@@ -332,6 +332,44 @@ export const ServerProcessDiagnosticsResult = Schema.Struct({
 });
 export type ServerProcessDiagnosticsResult = typeof ServerProcessDiagnosticsResult.Type;
 
+/**
+ * Safe-to-share diagnostics summary. This intentionally contains aggregates
+ * only; file paths, commands, trace IDs, causes, and conversation content are
+ * never included in an exported support bundle.
+ */
+export const ServerDiagnosticsExport = Schema.Struct({
+  schemaVersion: Schema.Literal("t3.diagnostics.v1"),
+  exportedAt: Schema.DateTimeUtc,
+  redactions: Schema.Array(TrimmedNonEmptyString),
+  traces: Schema.Struct({
+    recordCount: NonNegativeInt,
+    parseErrorCount: NonNegativeInt,
+    failureCount: NonNegativeInt,
+    interruptionCount: NonNegativeInt,
+    slowSpanCount: NonNegativeInt,
+  }),
+  processes: Schema.Struct({
+    processCount: NonNegativeInt,
+    totalRssBytes: NonNegativeInt,
+    totalCpuPercent: Schema.Number,
+  }),
+  runtime: Schema.Struct({
+    threadCount: NonNegativeInt,
+    activeRunCount: NonNegativeInt,
+    pendingApprovalCount: NonNegativeInt,
+    pendingUserInputCount: NonNegativeInt,
+    sessionStatusCounts: Schema.Record(TrimmedNonEmptyString, NonNegativeInt),
+  }),
+});
+export type ServerDiagnosticsExport = typeof ServerDiagnosticsExport.Type;
+
+export class ServerDiagnosticsExportError extends Schema.TaggedErrorClass<ServerDiagnosticsExportError>()(
+  "ServerDiagnosticsExportError",
+  {
+    message: TrimmedNonEmptyString,
+  },
+) {}
+
 export const ServerProcessResourceHistoryInput = Schema.Struct({
   windowMs: NonNegativeInt,
   bucketMs: NonNegativeInt,

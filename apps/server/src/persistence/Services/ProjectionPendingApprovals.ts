@@ -10,6 +10,7 @@ import {
   ApprovalRequestId,
   IsoDateTime,
   ProjectionPendingApprovalDecision,
+  ProjectionPendingApprovalOutcome,
   ProjectionPendingApprovalStatus,
   ThreadId,
   TurnId,
@@ -27,6 +28,7 @@ export const ProjectionPendingApproval = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   status: ProjectionPendingApprovalStatus,
   decision: ProjectionPendingApprovalDecision,
+  outcome: ProjectionPendingApprovalOutcome,
   createdAt: IsoDateTime,
   resolvedAt: Schema.NullOr(IsoDateTime),
 });

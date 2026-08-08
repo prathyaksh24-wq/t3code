@@ -22,8 +22,13 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
+  DEFAULT_ORCHESTRATION_APPROVAL_TIMEOUT_MS,
+  DEFAULT_ORCHESTRATION_MAX_CONCURRENT_RUNS,
+  DEFAULT_ORCHESTRATION_MAX_DURATION_MS,
+  DEFAULT_ORCHESTRATION_MAX_TOKENS,
   DEFAULT_UNIFIED_SETTINGS,
   type EnvironmentIdentificationMode,
+  type OrchestrationRunLimits,
   MAX_GLASS_OPACITY,
   MIN_GLASS_OPACITY,
 } from "@t3tools/contracts/settings";
@@ -728,6 +733,15 @@ export function GeneralSettingsPanel() {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+  const runLimits = settings.orchestrationRunLimits;
+  const commitRunLimit = useCallback(
+    <K extends keyof OrchestrationRunLimits>(key: K, value: string, multiplier = 1) => {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed < 1) return;
+      updateSettings({ orchestrationRunLimits: { [key]: parsed * multiplier } });
+    },
+    [updateSettings],
+  );
 
   return (
     <SettingsPageContainer>
@@ -1143,6 +1157,123 @@ export function GeneralSettingsPanel() {
                 }}
               />
             </div>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Run safety">
+        <SettingsRow
+          title="Concurrent runs"
+          description="Maximum provider turns that may run at the same time on this server."
+          resetAction={
+            runLimits.maxConcurrentRuns !== DEFAULT_ORCHESTRATION_MAX_CONCURRENT_RUNS ? (
+              <SettingResetButton
+                label="concurrent runs"
+                onClick={() =>
+                  updateSettings({
+                    orchestrationRunLimits: {
+                      maxConcurrentRuns: DEFAULT_ORCHESTRATION_MAX_CONCURRENT_RUNS,
+                    },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              type="number"
+              min={1}
+              max={16}
+              className="w-full sm:w-24"
+              value={String(runLimits.maxConcurrentRuns)}
+              onCommit={(value) => commitRunLimit("maxConcurrentRuns", value)}
+              aria-label="Maximum concurrent provider runs"
+            />
+          }
+        />
+        <SettingsRow
+          title="Maximum run duration"
+          description="Stop a turn that runs longer than this limit."
+          resetAction={
+            runLimits.maxDurationMs !== DEFAULT_ORCHESTRATION_MAX_DURATION_MS ? (
+              <SettingResetButton
+                label="maximum run duration"
+                onClick={() =>
+                  updateSettings({
+                    orchestrationRunLimits: {
+                      maxDurationMs: DEFAULT_ORCHESTRATION_MAX_DURATION_MS,
+                    },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              type="number"
+              min={1}
+              max={1_440}
+              className="w-full sm:w-24"
+              value={String(Math.round(runLimits.maxDurationMs / 60_000))}
+              onCommit={(value) => commitRunLimit("maxDurationMs", value, 60_000)}
+              aria-label="Maximum provider run duration in minutes"
+            />
+          }
+        />
+        <SettingsRow
+          title="Maximum tokens"
+          description="Stop a turn after its reported token usage reaches this ceiling."
+          resetAction={
+            runLimits.maxTokens !== DEFAULT_ORCHESTRATION_MAX_TOKENS ? (
+              <SettingResetButton
+                label="maximum tokens"
+                onClick={() =>
+                  updateSettings({
+                    orchestrationRunLimits: { maxTokens: DEFAULT_ORCHESTRATION_MAX_TOKENS },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              type="number"
+              min={1_000}
+              max={10_000_000}
+              className="w-full sm:w-36"
+              value={String(runLimits.maxTokens)}
+              onCommit={(value) => commitRunLimit("maxTokens", value)}
+              aria-label="Maximum provider run tokens"
+            />
+          }
+        />
+        <SettingsRow
+          title="Approval timeout"
+          description="Cancel an unanswered provider approval after this many minutes."
+          resetAction={
+            runLimits.approvalTimeoutMs !== DEFAULT_ORCHESTRATION_APPROVAL_TIMEOUT_MS ? (
+              <SettingResetButton
+                label="approval timeout"
+                onClick={() =>
+                  updateSettings({
+                    orchestrationRunLimits: {
+                      approvalTimeoutMs: DEFAULT_ORCHESTRATION_APPROVAL_TIMEOUT_MS,
+                    },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              type="number"
+              min={1}
+              max={1_440}
+              className="w-full sm:w-24"
+              value={String(Math.round(runLimits.approvalTimeoutMs / 60_000))}
+              onCommit={(value) => commitRunLimit("approvalTimeoutMs", value, 60_000)}
+              aria-label="Provider approval timeout in minutes"
+            />
           }
         />
       </SettingsSection>

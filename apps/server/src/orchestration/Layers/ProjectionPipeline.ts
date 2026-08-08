@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  type ApprovalResolutionOutcome,
   type ChatAttachment,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
@@ -128,6 +129,34 @@ function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
     detail.includes("unknown pending approval request") ||
     detail.includes("unknown pending permission request")
   );
+}
+
+function approvalOutcomeFromDecision(decision: unknown): ApprovalResolutionOutcome | null {
+  switch (decision) {
+    case "accept":
+    case "acceptForSession":
+      return "approved";
+    case "decline":
+      return "denied";
+    case "cancel":
+      return "cancelled";
+    default:
+      return null;
+  }
+}
+
+function approvalOutcomeFromPayload(payload: unknown): ApprovalResolutionOutcome | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+  const outcome = (payload as Record<string, unknown>).outcome;
+  return outcome === "approved" ||
+    outcome === "denied" ||
+    outcome === "cancelled" ||
+    outcome === "timed_out" ||
+    outcome === "runtime_terminated"
+    ? outcome
+    : approvalOutcomeFromDecision((payload as Record<string, unknown>).decision);
 }
 
 function derivePendingUserInputCountFromActivities(
@@ -1451,6 +1480,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             requestId,
           });
           if (event.payload.activity.kind === "approval.resolved") {
+            // The first terminal outcome wins. A provider callback can arrive
+            // after a timeout or user cancellation; it must not rewrite the
+            // durable outcome that the user already saw.
+            if (Option.isSome(existingRow) && existingRow.value.status === "resolved") {
+              return;
+            }
             const resolvedDecisionRaw =
               typeof event.payload.activity.payload === "object" &&
               event.payload.activity.payload !== null &&
@@ -1474,6 +1509,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 : event.payload.activity.turnId,
               status: "resolved",
               decision: resolvedDecision,
+              outcome: approvalOutcomeFromPayload(event.payload.activity.payload),
               createdAt: Option.isSome(existingRow)
                 ? existingRow.value.createdAt
                 : event.payload.activity.createdAt,
@@ -1502,6 +1538,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 turnId: existingRow.value.turnId,
                 status: "resolved",
                 decision: null,
+                outcome: "runtime_terminated",
                 createdAt: existingRow.value.createdAt,
                 resolvedAt: event.payload.activity.createdAt,
               });
@@ -1526,6 +1563,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             turnId: event.payload.activity.turnId,
             status: "pending",
             decision: null,
+            outcome: null,
             createdAt: Option.isSome(existingRow)
               ? existingRow.value.createdAt
               : event.payload.activity.createdAt,
@@ -1546,6 +1584,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             turnId: Option.isSome(existingRow) ? existingRow.value.turnId : null,
             status: "resolved",
             decision: event.payload.decision,
+            outcome: approvalOutcomeFromDecision(event.payload.decision),
             createdAt: Option.isSome(existingRow)
               ? existingRow.value.createdAt
               : event.payload.createdAt,

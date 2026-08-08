@@ -4,11 +4,13 @@ import { type PendingApproval } from "../../session-logic";
 interface ComposerPendingApprovalPanelProps {
   approval: PendingApproval;
   pendingCount: number;
+  pendingIndex?: number;
 }
 
 export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprovalPanel({
   approval,
   pendingCount,
+  pendingIndex = 1,
 }: ComposerPendingApprovalPanelProps) {
   const approvalSummary =
     approval.requestKind === "command"
@@ -29,7 +31,9 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
         <span className="uppercase text-sm tracking-[0.2em]">PENDING APPROVAL</span>
         <span className="text-sm font-medium">{approvalSummary}</span>
         {pendingCount > 1 ? (
-          <span className="text-xs text-muted-foreground">1/{pendingCount}</span>
+          <span className="text-xs text-muted-foreground">
+            {pendingIndex}/{pendingCount}
+          </span>
         ) : null}
       </div>
       {approval.detail ? (
