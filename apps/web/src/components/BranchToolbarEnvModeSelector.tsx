@@ -37,6 +37,9 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   onUsePreviousWorktree,
 }: BranchToolbarEnvModeSelectorProps) {
   const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
+  const workspaceContextTitle = activeWorktreePath
+    ? `Workspace: ${activeWorktreePath}`
+    : "Workspace: current project checkout";
   const envModeItems = useMemo(
     () => [
       { value: "local", label: resolveCurrentWorkspaceLabel(activeWorktreePath) },
@@ -50,7 +53,10 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
 
   if (envLocked) {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs">
+      <span
+        className="inline-flex shrink-0 items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs"
+        title={workspaceContextTitle}
+      >
         {activeWorktreePath ? (
           <>
             <FolderGitIcon className="size-3" />
@@ -84,6 +90,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         size="xs"
         className="shrink-0 font-medium"
         aria-label="Workspace"
+        title={workspaceContextTitle}
       >
         {effectiveEnvMode === "worktree" ? (
           <FolderGit2Icon className="size-3" />

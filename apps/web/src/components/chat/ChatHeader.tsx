@@ -27,6 +27,7 @@ interface ChatHeaderProps {
   activeThreadTitle: string;
   activeProjectName: string | undefined;
   activeProjectCwd: string | null;
+  activeWorkspacePath: string | null;
   openInCwd: string | null;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
@@ -63,6 +64,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   activeProjectName,
   activeProjectCwd,
+  activeWorkspacePath,
   openInCwd,
   activeProjectScripts,
   preferredScriptId,
@@ -100,6 +102,7 @@ export const ChatHeader = memo(function ChatHeader({
                   <button
                     type="button"
                     aria-label={`New thread in ${activeProjectName}`}
+                    title={activeWorkspacePath ?? activeProjectCwd ?? activeProjectName}
                     onClick={onNewThreadInProject}
                     className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   />
@@ -112,7 +115,14 @@ export const ChatHeader = memo(function ChatHeader({
                 />
                 <span className="max-w-40 truncate text-sm font-medium">{activeProjectName}</span>
               </TooltipTrigger>
-              <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
+              <TooltipPopup side="top">
+                <div>New thread in {activeProjectName}</div>
+                {activeWorkspacePath ? (
+                  <div className="max-w-[32rem] truncate font-mono text-[11px] text-muted-foreground">
+                    Workspace: {activeWorkspacePath}
+                  </div>
+                ) : null}
+              </TooltipPopup>
             </Tooltip>
             <span aria-hidden className="text-muted-foreground/40">
               /
