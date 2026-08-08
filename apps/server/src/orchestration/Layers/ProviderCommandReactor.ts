@@ -48,6 +48,7 @@ import {
 } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import * as WorkspaceMutationGuard from "../../workspace/WorkspaceMutationGuard.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -205,6 +206,7 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const workspaceMutationGuard = yield* WorkspaceMutationGuard.WorkspaceMutationGuard;
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
@@ -313,6 +315,14 @@ const make = Effect.gen(function* () {
       : undefined;
     if (providerError) {
       return providerError.detail;
+    }
+    const workspaceConflict = Schema.is(WorkspaceMutationGuard.WorkspaceMutationConflictError)(
+      failReason?.error,
+    )
+      ? failReason.error
+      : undefined;
+    if (workspaceConflict) {
+      return workspaceConflict.message;
     }
     return Cause.pretty(cause);
   };
@@ -996,9 +1006,44 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    const project = yield* resolveProject(thread.projectId);
+    const workspacePath = resolveThreadWorkspaceCwd({
+      thread,
+      projects: project ? [project] : [],
+    });
+    if (!workspacePath) {
+      yield* handleTurnStartFailure(
+        Cause.fail(new Error(`Thread '${thread.id}' has no workspace path for this turn.`)),
+      );
+      return;
+    }
+
+    const claimedWorkspacePath = yield* workspaceMutationGuard
+      .acquire({
+        workspacePath,
+        threadId: thread.id,
+        operation: "provider-turn",
+      })
+      .pipe(
+        Effect.map(({ workspacePath: canonicalWorkspacePath }) =>
+          Option.some(canonicalWorkspacePath),
+        ),
+        Effect.catchCause((cause) =>
+          handleTurnStartFailure(cause).pipe(Effect.as(Option.none<string>())),
+        ),
+      );
+    if (Option.isNone(claimedWorkspacePath)) {
+      return;
+    }
+
+    yield* providerService.sendTurn(sendTurnRequest.value).pipe(
+      Effect.catchCause((cause) =>
+        workspaceMutationGuard
+          .release({ workspacePath: claimedWorkspacePath.value, threadId: thread.id })
+          .pipe(Effect.andThen(recoverTurnStartFailure(cause))),
+      ),
+      Effect.forkScoped,
+    );
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -1234,6 +1279,18 @@ const make = Effect.gen(function* () {
     const now = event.payload.createdAt;
     if (thread.session && thread.session.status !== "stopped") {
       yield* providerService.stopSession({ threadId: thread.id });
+    }
+
+    const project = yield* resolveProject(thread.projectId);
+    const workspacePath = resolveThreadWorkspaceCwd({
+      thread,
+      projects: project ? [project] : [],
+    });
+    if (workspacePath) {
+      yield* workspaceMutationGuard.release({
+        workspacePath,
+        threadId: thread.id,
+      });
     }
 
     yield* setThreadSession({
