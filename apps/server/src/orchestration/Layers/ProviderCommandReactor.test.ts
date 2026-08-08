@@ -64,6 +64,7 @@ import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
+import * as WorkspaceMutationGuard from "../../workspace/WorkspaceMutationGuard.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -97,7 +98,8 @@ describe("ProviderCommandReactor", () => {
     | OrchestrationEngineService
     | ProviderCommandReactor
     | ProjectionSnapshotQuery
-    | ProviderSessionDirectory,
+    | ProviderSessionDirectory
+    | WorkspaceMutationGuard.WorkspaceMutationGuard,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -395,6 +397,7 @@ describe("ProviderCommandReactor", () => {
         }),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(WorkspaceMutationGuard.layer),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -404,6 +407,9 @@ describe("ProviderCommandReactor", () => {
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
     const sessionDirectory = await runtime.runPromise(Effect.service(ProviderSessionDirectory));
+    const workspaceMutationGuard = await runtime.runPromise(
+      Effect.service(WorkspaceMutationGuard.WorkspaceMutationGuard),
+    );
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(reactor.drain);
@@ -450,6 +456,7 @@ describe("ProviderCommandReactor", () => {
       generateThreadTitle,
       runtimeSessions,
       sessionDirectory,
+      workspaceMutationGuard,
       dispatch: (command: Parameters<typeof engine.dispatch>[0]) =>
         Effect.runPromise(engine.dispatch(command)),
       upsertSessionBinding: (binding: Parameters<typeof sessionDirectory.upsert>[0]) =>
@@ -499,6 +506,69 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("rejects a provider turn when another thread owns the same worktree", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    await Effect.runPromise(
+      harness.workspaceMutationGuard.acquire({
+        workspacePath: "/tmp/provider-project",
+        threadId: "thread-owner",
+        operation: "provider-turn",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-thread-create-conflict"),
+        threadId: ThreadId.make("thread-2"),
+        projectId: asProjectId("project-1"),
+        title: "Second thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-conflict"),
+        threadId: ThreadId.make("thread-2"),
+        message: {
+          messageId: asMessageId("user-message-conflict"),
+          role: "user",
+          text: "try the shared worktree",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return (
+        readModel.threads
+          .find((entry) => entry.id === ThreadId.make("thread-2"))
+          ?.activities.some(
+            (activity) =>
+              activity.kind === "provider.turn.start.failed" &&
+              String(
+                (activity.payload as { readonly detail?: unknown } | undefined)?.detail,
+              ).includes("already being modified"),
+          ) ?? false
+      );
+    });
+    expect(harness.sendTurn).not.toHaveBeenCalled();
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>

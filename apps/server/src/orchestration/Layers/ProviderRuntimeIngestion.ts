@@ -40,6 +40,8 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import * as WorkspaceMutationGuard from "../../workspace/WorkspaceMutationGuard.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -814,6 +816,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const workspaceMutationGuard = yield* WorkspaceMutationGuard.WorkspaceMutationGuard;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const providerCommandMetadata = (event: ProviderRuntimeEvent, tag: string) =>
@@ -1820,6 +1823,32 @@ const make = Effect.gen(function* () {
               updatedAt: now,
             },
             createdAt: now,
+          });
+        }
+      }
+
+      if (
+        (shouldApplyThreadLifecycle ||
+          (thread.session?.status === "interrupted" &&
+            (event.type === "session.exited" ||
+              eventTurnId === undefined ||
+              activeTurnId === null ||
+              sameId(activeTurnId, eventTurnId)))) &&
+        (event.type === "turn.completed" ||
+          event.type === "turn.aborted" ||
+          event.type === "session.exited")
+      ) {
+        const project = yield* projectionSnapshotQuery
+          .getProjectShellById(thread.projectId)
+          .pipe(Effect.map(Option.getOrUndefined));
+        const workspacePath = resolveThreadWorkspaceCwd({
+          thread,
+          projects: project ? [project] : [],
+        });
+        if (workspacePath) {
+          yield* workspaceMutationGuard.release({
+            workspacePath,
+            threadId: thread.id,
           });
         }
       }

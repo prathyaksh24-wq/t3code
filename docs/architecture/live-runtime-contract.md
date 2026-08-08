@@ -54,6 +54,28 @@ activity when they stop a run. Approval rows persist a first-terminal outcome
 (`approved`, `denied`, `cancelled`, `timed_out`, or `runtime_terminated`) so a
 late provider callback cannot rewrite what the user saw.
 
+## Workspace mutation ownership
+
+The active project, branch, and effective worktree are one runtime context. The
+web client keeps terminal, files, and diffs scoped to the active thread and
+resolves the effective path as `thread.worktreePath ?? project.workspaceRoot`.
+The chat header exposes that path in the project context tooltip before a user
+starts a mutation.
+
+Before a provider turn is sent, the server claims the canonical physical path
+through `WorkspaceMutationGuard`. Claims are reentrant for the owning thread,
+but a second thread receives a terminal start failure that names the owning
+thread and asks the user to stop it or choose another worktree. The claim is
+released only after an accepted `turn.completed`, `turn.aborted`, or
+`session.exited` lifecycle event; a failed turn-start releases it immediately.
+This prevents two provider sessions from silently editing the same checkout
+while keeping separate worktrees available for concurrent work.
+
+The guard is an in-memory server lease. It is intentionally not a durable lock:
+provider sessions and PTYs are also re-established after a server restart, so
+the next turn must reacquire ownership from the current runtime state. Shell
+commands launched outside T3 Code remain outside this application-level guard.
+
 ## Runtime settings and credentials
 
 Provider settings keep runtime configuration separate from the selected model and
