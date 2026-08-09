@@ -636,6 +636,8 @@ function parseClaudeInitializationCommands(
           name,
           ...(description ? { description } : {}),
           ...(argumentHint ? { input: { hint: argumentHint } } : {}),
+          state: { status: "enabled" },
+          source: { kind: "runtime", label: "Claude Code initialization" },
         } satisfies ServerProviderSlashCommand,
       ];
     }),
@@ -903,6 +905,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
   const slashCommands = capabilities?.slashCommands ?? [];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
+  const reportedCapabilityKinds = ["skill", ...(capabilities ? ["slash-command"] : [])];
 
   if (!capabilities) {
     return buildServerProvider({
@@ -912,6 +915,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       models,
       slashCommands: dedupedSlashCommands,
       skills,
+      reportedCapabilityKinds,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -934,6 +938,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     models,
     slashCommands: dedupedSlashCommands,
     skills,
+    reportedCapabilityKinds,
     probe: {
       installed: true,
       version: parsedVersion,

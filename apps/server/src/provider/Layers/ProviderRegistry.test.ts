@@ -270,6 +270,8 @@ function makeCodexProbeSnapshot(
       },
     ],
     skills: [],
+    reportedCapabilityKinds: [],
+    reportedCapabilities: [],
     ...input,
   };
 }

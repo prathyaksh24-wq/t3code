@@ -29,6 +29,16 @@ Claude HOME path: empty
 
 An empty `Claude HOME path` means T3 Code uses your normal home directory.
 
+## Inspect Claude Capabilities
+
+Expand the Claude provider in Settings to inspect Claude Code skills, initialization commands, and
+execution modes. User and project skills remain labeled separately so similarly named skills do not
+look like shared T3 Code configuration.
+
+The status probe does not load Claude MCP configuration. Settings therefore says "Not reported by
+runtime" for MCP servers instead of claiming that none are configured. T3 Code does not copy Claude
+configuration into another provider.
+
 ## I Want Work And Personal Claude Accounts
 
 Use a different Claude home for each account.

@@ -191,6 +191,10 @@
       "types": "./src/hostProcess.ts",
       "import": "./src/hostProcess.ts"
     },
+    "./providerCapabilities": {
+      "types": "./src/providerCapabilities.ts",
+      "import": "./src/providerCapabilities.ts"
+    },
     "./httpReadiness": {
       "types": "./src/httpReadiness.ts",
       "import": "./src/httpReadiness.ts"

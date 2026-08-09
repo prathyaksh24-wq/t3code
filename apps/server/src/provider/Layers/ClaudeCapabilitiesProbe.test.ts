@@ -46,8 +46,10 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
       const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-probe-sdk-" });
       const executablePath = path.join(tempDir, "fake-claude.mjs");
       const invocationPath = path.join(tempDir, "invocation.json");
-      const workspaceCwd = path.join(tempDir, "workspace");
-      yield* fs.makeDirectory(workspaceCwd, { recursive: true });
+      // Keep the fake process cwd outside the scoped temp directory. The
+      // Claude SDK aborts asynchronously, and Windows will not remove a
+      // directory while a child process still has it as its cwd.
+      const workspaceCwd = process.cwd();
 
       yield* fs.writeFileString(
         executablePath,
@@ -115,6 +117,8 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
             name: "review",
             description: "Review changes",
             input: { hint: "[path]" },
+            state: { status: "enabled" },
+            source: { kind: "runtime", label: "Claude Code initialization" },
           },
         ],
       });

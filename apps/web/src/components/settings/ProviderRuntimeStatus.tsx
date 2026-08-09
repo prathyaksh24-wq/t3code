@@ -13,6 +13,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { getProviderSummary, type ProviderStatusKey } from "./providerStatus";
+import { ProviderCapabilityInventory } from "./ProviderCapabilityInventory";
 
 function capabilityLabel(capability: ProviderRuntimeCapability): string {
   return capability.support === "supported" ? "Supported" : "Not supported";
@@ -184,6 +185,8 @@ export function ProviderRuntimeStatus(props: {
           <span className="text-xs opacity-90">{action.detail}</span>
         </div>
       </div>
+
+      {provider ? <ProviderCapabilityInventory provider={provider} /> : null}
     </section>
   );
 }
