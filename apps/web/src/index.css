@@ -380,20 +380,34 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   @keyframes t3-chat-composer-streaming-pulse {
     0%,
     100% {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent);
+      opacity: 0;
+      transform: scale(0.996);
     }
     50% {
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+      opacity: 1;
+      transform: scale(1);
     }
   }
 
   [data-chat-composer-form="true"][data-chat-composer-running="true"] {
+    position: relative;
+  }
+
+  [data-chat-composer-form="true"][data-chat-composer-running="true"]::after {
+    position: absolute;
+    inset: -3px;
+    border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
+    border-radius: inherit;
+    content: "";
+    pointer-events: none;
     animation: t3-chat-composer-streaming-pulse 1.8s steps(8, end) infinite;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    [data-chat-composer-form="true"][data-chat-composer-running="true"] {
+    [data-chat-composer-form="true"][data-chat-composer-running="true"]::after {
       animation: none;
+      opacity: 1;
+      transform: none;
     }
   }
 

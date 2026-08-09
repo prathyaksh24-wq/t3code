@@ -23,6 +23,12 @@ it("allows a standard hosted runner and the built-in GitHub token", () => {
   assert.deepEqual(findActiveWorkflowViolations("ci.yml", workflow), []);
 });
 
+it("allows the standard Windows runner used for unsigned beta artifacts", () => {
+  const workflow = ["jobs:", "  build:", "    runs-on: windows-2025"].join("\n");
+
+  assert.deepEqual(findActiveWorkflowViolations("beta-artifact.yml", workflow), []);
+});
+
 it("rejects unapproved runners, secrets, and repository variables", () => {
   const workflow = [
     "jobs:",

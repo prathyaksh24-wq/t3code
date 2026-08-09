@@ -18,4 +18,8 @@ Use each release surface for one purpose:
 6. Generate GitHub release notes and review them before publication.
 7. Record breaking changes, migrations, and known limitations explicitly.
 
+For the local one-to-three-user rollout, follow [Small beta operations](./small-beta.md) and the
+[Provider qualification matrix](./provider-qualification.md). The **Fork Beta Artifact** workflow
+creates an unsigned Windows test artifact without publishing through upstream-owned services.
+
 The inherited T3 release, relay deployment, and Expo delivery workflows are archived under `docs/upstream/workflows/`. They are documentation, not active GitHub Actions workflows. Do not restore them until every external account in `prerequisites.md` has a named fork owner, a least-privilege credential, a reviewed release path, and a tested rollback path.

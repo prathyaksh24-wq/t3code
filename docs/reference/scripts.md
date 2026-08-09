@@ -4,6 +4,9 @@
 - `vp run dev --share` — Also publishes the web port over HTTPS on this machine's tailnet. The startup pairing URL is built against the shared origin, and the mapping is removed on exit.
 - `vp run dev:server` — Starts just the WebSocket server. The server process runs on Bun (`@effect/platform-bun` + `BunPtyAdapter`), but task running uses `vp run`.
 - `vp run dev:web` — Starts just the Vite dev server for the web app.
+- `vp run beta:qualify` — Validates that every supported runtime has automated evidence or a documented beta exception for each required qualification area.
+- `vp run beta:seed-web -- --base-dir <path> --isolated-fixture` — Seeds a credential-free beta visual fixture after an isolated server has run migrations. It refuses a database that already contains projects.
+- `vp run beta:capture-web -- --base-dir <path> --server-port <port> --web-url <origin> --output-dir <path>` — Pairs a controlled Chromium browser with an already-running seeded environment, captures required beta states, and enforces idle/streaming performance budgets.
 - Dev commands run from a linked **git worktree** default to that worktree's gitignored `.t3`, even when `T3CODE_HOME` is set, storing state in `<worktree>/.t3/userdata`. Pass `--home-dir <path>` to choose another isolated directory explicitly. Submodules are not worktrees and keep the normal precedence.
 - From the **main checkout**, dev commands implicitly use `~/.t3/dev`, keeping development state separate from `~/.t3/userdata`. An explicit `--home-dir <path>` stores state under `<path>/userdata`; the base directory remains available for caches, worktrees, and other shared data.
 - Web dev commands do not auto-open a browser. Open the one-time pairing URL printed by the server so the first browser navigation is authenticated. Set `T3CODE_NO_BROWSER=0` only when interactive auto-open is intentional.

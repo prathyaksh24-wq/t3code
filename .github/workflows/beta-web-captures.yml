@@ -1,0 +1,86 @@
+name: Beta Web Captures
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch, or tag to capture
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Capture beta states and performance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout selected source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Start isolated web environment
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/t3-web-beta"
+          node scripts/dev-runner.ts dev --home-dir "$RUNNER_TEMP/t3-web-beta" \
+            > "$RUNNER_TEMP/t3-web-beta/dev.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/t3-web-beta/dev.pid"
+
+      - name: Wait for migrations and seed beta state
+        shell: bash
+        run: |
+          for attempt in {1..240}; do
+            if curl --fail --silent http://localhost:5733/.well-known/t3/environment > /dev/null; then
+              break
+            fi
+            if [[ "$attempt" == "240" ]]; then
+              cat "$RUNNER_TEMP/t3-web-beta/dev.log"
+              exit 1
+            fi
+            sleep 0.5
+          done
+          vp run beta:seed-web -- \
+            --base-dir "$RUNNER_TEMP/t3-web-beta" \
+            --isolated-fixture
+
+      - name: Capture required states and enforce performance budgets
+        run: |
+          vp run beta:capture-web -- \
+            --base-dir "$RUNNER_TEMP/t3-web-beta" \
+            --server-port 13773 \
+            --web-url http://localhost:5733 \
+            --browser-path /usr/bin/google-chrome \
+            --output-dir artifacts/beta-web
+
+      - name: Stop isolated web environment
+        if: always()
+        shell: bash
+        run: |
+          pid_file="$RUNNER_TEMP/t3-web-beta/dev.pid"
+          if [[ -f "$pid_file" ]]; then
+            dev_pid="$(cat "$pid_file")"
+            kill "$dev_pid" 2>/dev/null || true
+          fi
+
+      - name: Upload captures, report, and dev log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: beta-web-captures-${{ github.run_number }}
+          path: |
+            artifacts/beta-web/**
+            ${{ runner.temp }}/t3-web-beta/dev.log
+          if-no-files-found: warn
+          retention-days: 14
