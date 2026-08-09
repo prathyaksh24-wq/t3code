@@ -13,8 +13,11 @@ Use this skill for the web client. For iOS Simulator, Android Emulator, or physi
 2. Choose a base directory that belongs only to the current worktree or test:
    - Use the repository's ignored `.t3` directory for reusable worktree-local state.
    - Use `mktemp -d /tmp/t3code-test.XXXXXX` for disposable state and retain the printed absolute path.
-3. Start the full web stack with `vp run dev`. Add `--share` when the user needs to open it from another tailnet device. In a linked worktree it defaults to that worktree's gitignored `.t3`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
-4. Keep the terminal session alive and read the selected server port, web port, base directory, and pairing URL from its output.
+3. Check `node --version` against the root `package.json` engine before launching. The required Node directory must precede older Node installations on `PATH`, because the dev runner's child `vp` and `node --watch` processes resolve `node` again. Starting the parent with an absolute Node path is not sufficient when its children fall back to another version.
+4. Start the full web stack with `vp run dev`. Add `--share` when the user needs to open it from another tailnet device. In a linked worktree it defaults to that worktree's gitignored `.t3`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
+5. Keep the terminal session alive and read the selected server port, web port, base directory, and pairing URL from its output.
+
+Do not treat a spawned process ID, a Vite HTTP 200 response, or the first Vite log line as server readiness. Wait for the backend `Listening` line and the authentication/pairing line. In sandboxed Windows agent sessions, a detached child can exit immediately with an `EPERM` filesystem error even though its launcher briefly existed; start the retained dev terminal through the approved host execution path and verify the printed listener state.
 
 Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.t3` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
 
@@ -52,6 +55,8 @@ Treat the overall testing or implementation loop—not an assistant turn or one 
 
 Treat pairing URLs as secrets. Do not copy them into final responses, screenshots, committed files, or durable logs. A pairing token is short-lived and single-use; opening the URL in another browser or opening it twice can consume it.
 
+For Playwright or another Chromium automation API, use navigation readiness `commit` for the pairing URL and redirect, then wait for the app's actual DOM readiness. Waiting for the browser `load` event can hang on a healthy development app. Keep the web hostname exactly as the dev runner printed it; on Windows, Vite may listen on `localhost`/`::1` while `127.0.0.1` refuses the same port.
+
 ## Recover a consumed or expired pairing token
 
 Create another token against the same database and web URL as the running dev server:
@@ -64,6 +69,8 @@ T3CODE_PORT=<server-port> node apps/server/src/bin.ts auth pairing create \
   --ttl 15m \
   --label agent-ui-test
 ```
+
+For automation, add `--json`, parse the returned object, and use its exact `pairUrl`. Do not extract a URL from mixed CLI output: the output may contain an incidental startup URL for a different token.
 
 Use the `Pair URL` from this command once. Derive `<server-port>` and `<web-url>` from the current dev-runner output, including any automatically selected port offset. Setting `T3CODE_PORT` keeps the administrative CLI from probing for an unrelated free port.
 
@@ -99,3 +106,18 @@ If completion is uncertain, keep the environment alive and mention that it is re
 - If the replacement token is rejected, verify that the CLI and server use the identical absolute base directory and web URL.
 - If the UI shows unexpected data, verify that every command uses the identical explicit base directory before editing anything.
 - If ports move because another instance is running, trust the current dev-runner output rather than assuming ports `13773` and `5733`.
+- If a test visits Settings and returns to the chat, use the app's history/navigation path. A hard `page.goto()` reload tears down the environment WebSocket; cached UI can appear ready while environment-backed controls remain disabled.
+- Locate dynamic React controls by role, accessible name, or stable DOM ownership. Do not retain `locator.nth(index)` handles across renders.
+
+## Run the repeatable browser smoke check
+
+After the dev runner prints both the backend listener and pairing lines, run:
+
+```powershell
+node .agents/skills/test-t3-app/scripts/smoke-browser.mjs `
+  --base-dir <absolute-base-dir> `
+  --server-port <server-port> `
+  --web-url <web-origin>
+```
+
+The script uses the repository's installed `playwright-core`, prefers Brave on Windows, creates tokens with JSON output, and never prints them. It allows two minutes for a cold Windows module graph. If the backend restarts between readiness and token exchange, it reissues a token within the same overall timeout. It verifies pairing, application readiness, a send-ready composer, a Settings round trip, environment reconnection, and browser errors. A startup WebSocket failure is reported as recovered only when both composer readiness checks later prove that the environment connected. Pass `--browser-path <absolute-path>` when Brave or another Chromium browser is installed elsewhere.
