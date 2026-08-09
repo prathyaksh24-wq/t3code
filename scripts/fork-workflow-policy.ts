@@ -2,7 +2,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-const approvedRunnerLabels = new Set(["macos-15", "ubuntu-24.04"]);
+const approvedRunnerLabels = new Set(["macos-15", "ubuntu-24.04", "windows-2025"]);
 const approvedCredentialReferences = new Set(["secrets.GITHUB_TOKEN"]);
 const credentialReferencePattern = /\b(?:secrets|vars)\.[A-Za-z0-9_]+\b/g;
 const runnerLabelPattern = /^\s*runs-on:\s*([^\s#]+)\s*(?:#.*)?$/gm;

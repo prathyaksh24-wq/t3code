@@ -1,0 +1,83 @@
+name: Fork Beta Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch, or tag to qualify and package
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: Qualify beta source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout selected source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Validate provider qualification coverage
+        run: vp run beta:qualify
+
+      - name: Check source and types
+        run: |
+          vp check
+          vpr typecheck
+
+      - name: Run contract, component, and integration tests
+        run: vp run test
+
+      - name: Build the production desktop pipeline
+        run: vp run build:desktop
+
+      - name: Exercise release-only steps
+        run: vp run release:smoke
+
+  windows_beta:
+    name: Build unsigned Windows beta
+    needs: qualify
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout qualified source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Build unsigned Windows installer
+        run: vp run dist:desktop:win:x64
+
+      - name: Upload beta installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: t3-code-windows-x64-beta-${{ github.run_number }}
+          path: release/**
+          if-no-files-found: error
+          retention-days: 14
