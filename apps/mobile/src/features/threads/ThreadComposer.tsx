@@ -14,6 +14,7 @@ import {
   serializeComposerFileLink,
   type ComposerTrigger,
 } from "@t3tools/shared/composerTrigger";
+import { isProviderCapabilityInvokable } from "@t3tools/shared/providerCapabilities";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
@@ -398,6 +399,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
       const providerCommands: ComposerCommandItem[] = [];
       for (const cmd of selectedProviderStatus?.slashCommands ?? []) {
+        if (!isProviderCapabilityInvokable(cmd)) continue;
         if (!cmd.name.toLowerCase().includes(q)) continue;
         providerCommands.push({
           id: `pcmd:${cmd.name}`,
@@ -412,7 +414,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
 
     if (composerTrigger.kind === "skill") {
-      const enabledSkills = (selectedProviderStatus?.skills ?? []).filter((s) => s.enabled);
+      const enabledSkills = (selectedProviderStatus?.skills ?? []).filter((skill) =>
+        isProviderCapabilityInvokable(skill, skill.enabled),
+      );
       const normalizedQuery = normalizeSearchQuery(composerTrigger.query, {
         trimLeadingPattern: /^\$+/,
       });

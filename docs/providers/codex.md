@@ -27,6 +27,15 @@ Log in with Codex normally:
 codex login
 ```
 
+## Inspect Codex Capabilities
+
+Expand the Codex provider in Settings to inspect the skills, installed plugins, MCP servers, and
+execution modes reported by that Codex runtime. Each entry shows its source and whether it is
+enabled, unavailable, missing setup, or restricted by policy.
+
+This view does not import or rewrite Codex configuration. If a skill, plugin, or MCP server needs
+attention, make the change through Codex and refresh the provider status in T3 Code.
+
 ## I Want Work And Personal Codex Accounts
 
 Use one real Codex home and one shadow home.

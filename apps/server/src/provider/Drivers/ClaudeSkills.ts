@@ -137,6 +137,11 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         path: skillPath,
         enabled: true,
         scope: root.scope,
+        state: { status: "enabled" },
+        source: {
+          kind: root.scope,
+          label: root.scope === "project" ? "Claude project skills" : "Claude user skills",
+        },
         ...(frontmatter.kind === "parsed" && frontmatter.description
           ? { description: frontmatter.description }
           : {}),

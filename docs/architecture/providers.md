@@ -17,6 +17,19 @@ Codex, Claude, Cursor, Grok, and OpenCode are implemented behind the shared
 provider adapter boundary. See [Live runtime contract](./live-runtime-contract.md)
 for cross-provider event identity, fixtures, and capability reporting.
 
+## Runtime-owned capability inventory
+
+Provider snapshots carry the capabilities a runtime reports about itself. Skills and slash commands
+keep their invocation-shaped fields, while MCP servers, plugins, and future read-only capability
+kinds use the open `reportedCapabilities` collection. Every reported item includes its runtime
+source and one of four states: enabled, unavailable, misconfigured, or permission-restricted.
+
+`reportedCapabilityKinds` distinguishes an empty runtime report from a runtime that does not expose
+that inventory. Clients must show the latter as "Not reported by runtime" rather than claiming that
+the user has no configuration. Capability inventory is read-only: T3 Code does not copy one
+runtime's settings into another runtime. Web and mobile invocation surfaces also exclude items whose
+reported state is not enabled.
+
 ## Client transport
 
 `wsTransport.ts` manages connection state: `connecting` → `open` → `reconnecting` → `closed` → `disposed`. Outbound requests are queued while disconnected and flushed on reconnect. Inbound pushes are decoded and validated at the boundary, then cached per channel. Subscribers can opt into `replayLatest` to receive the last push on subscribe.

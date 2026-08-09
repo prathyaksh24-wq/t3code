@@ -53,6 +53,8 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
           path: path.join(configDir, "skills", "codex-review", "SKILL.md"),
           enabled: true,
           scope: "user",
+          state: { status: "enabled" },
+          source: { kind: "user", label: "Claude user skills" },
           description: "Ask Codex for a review.",
         },
         {
@@ -60,6 +62,8 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
           path: path.join(workspace, ".claude", "skills", "deploy", "SKILL.md"),
           enabled: true,
           scope: "project",
+          state: { status: "enabled" },
+          source: { kind: "project", label: "Claude project skills" },
           description: "Deploy the app.",
         },
       ]);

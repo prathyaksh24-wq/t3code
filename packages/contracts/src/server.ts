@@ -75,10 +75,29 @@ export const ServerProviderSlashCommandInput = Schema.Struct({
 });
 export type ServerProviderSlashCommandInput = typeof ServerProviderSlashCommandInput.Type;
 
+export const ServerProviderCapabilityState = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("enabled"),
+  }),
+  Schema.Struct({
+    status: Schema.Literals(["unavailable", "misconfigured", "permission-restricted"]),
+    reason: TrimmedNonEmptyString,
+  }),
+]);
+export type ServerProviderCapabilityState = typeof ServerProviderCapabilityState.Type;
+
+export const ServerProviderCapabilitySource = Schema.Struct({
+  kind: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+});
+export type ServerProviderCapabilitySource = typeof ServerProviderCapabilitySource.Type;
+
 export const ServerProviderSlashCommand = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedNonEmptyString),
   input: Schema.optional(ServerProviderSlashCommandInput),
+  state: Schema.optional(ServerProviderCapabilityState),
+  source: Schema.optional(ServerProviderCapabilitySource),
 });
 export type ServerProviderSlashCommand = typeof ServerProviderSlashCommand.Type;
 
@@ -90,8 +109,25 @@ export const ServerProviderSkill = Schema.Struct({
   enabled: Schema.Boolean,
   displayName: Schema.optional(TrimmedNonEmptyString),
   shortDescription: Schema.optional(TrimmedNonEmptyString),
+  state: Schema.optional(ServerProviderCapabilityState),
+  source: Schema.optional(ServerProviderCapabilitySource),
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
+
+/**
+ * Runtime-reported capabilities that do not have an invocation contract in
+ * T3 Code. `kind` and `source.kind` stay open so adapters can expose new
+ * runtime concepts without changing the wire schema for every addition.
+ */
+export const ServerProviderReportedCapability = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  kind: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(TrimmedNonEmptyString),
+  state: ServerProviderCapabilityState,
+  source: ServerProviderCapabilitySource,
+});
+export type ServerProviderReportedCapability = typeof ServerProviderReportedCapability.Type;
 
 /**
  * Availability of a configured provider instance from the runtime's POV.
@@ -190,6 +226,8 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  reportedCapabilityKinds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  reportedCapabilities: Schema.optional(Schema.Array(ServerProviderReportedCapability)),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
 });

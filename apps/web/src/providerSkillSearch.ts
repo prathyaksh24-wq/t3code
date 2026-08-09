@@ -4,6 +4,7 @@ import {
   normalizeSearchQuery,
   scoreQueryMatch,
 } from "@t3tools/shared/searchRanking";
+import { isProviderCapabilityInvokable } from "@t3tools/shared/providerCapabilities";
 
 import { formatProviderSkillDisplayName } from "./providerSkillPresentation";
 
@@ -71,7 +72,9 @@ export function searchProviderSkills(
   query: string,
   limit = Number.POSITIVE_INFINITY,
 ): ServerProviderSkill[] {
-  const enabledSkills = skills.filter((skill) => skill.enabled);
+  const enabledSkills = skills.filter((skill) =>
+    isProviderCapabilityInvokable(skill, skill.enabled),
+  );
   const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ });
 
   if (!normalizedQuery) {

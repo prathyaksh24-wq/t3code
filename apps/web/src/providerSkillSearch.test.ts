@@ -56,4 +56,19 @@ describe("searchProviderSkills", () => {
 
     expect(searchProviderSkills(skills, "ui").map((skill) => skill.name)).toEqual([]);
   });
+
+  it("omits skills blocked by runtime policy even when the legacy flag is enabled", () => {
+    const skills = [
+      makeSkill({
+        name: "restricted-review",
+        enabled: true,
+        state: {
+          status: "permission-restricted",
+          reason: "Disabled by administrator policy.",
+        },
+      }),
+    ];
+
+    expect(searchProviderSkills(skills, "restricted")).toEqual([]);
+  });
 });

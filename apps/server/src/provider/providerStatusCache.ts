@@ -57,6 +57,10 @@ export const hydrateCachedProvider = (input: {
   }
 
   const { message: _fallbackMessage, ...fallbackWithoutMessage } = input.fallbackProvider;
+  const reportedCapabilityKinds =
+    input.cachedProvider.reportedCapabilityKinds ?? input.fallbackProvider.reportedCapabilityKinds;
+  const reportedCapabilities =
+    input.cachedProvider.reportedCapabilities ?? input.fallbackProvider.reportedCapabilities;
   const hydratedProvider: ServerProvider = {
     ...fallbackWithoutMessage,
     models: mergeProviderModels(input.fallbackProvider.models, input.cachedProvider.models),
@@ -67,6 +71,8 @@ export const hydrateCachedProvider = (input: {
     checkedAt: input.cachedProvider.checkedAt,
     slashCommands: input.cachedProvider.slashCommands,
     skills: input.cachedProvider.skills,
+    ...(reportedCapabilityKinds ? { reportedCapabilityKinds } : {}),
+    ...(reportedCapabilities ? { reportedCapabilities } : {}),
   };
 
   return input.cachedProvider.message

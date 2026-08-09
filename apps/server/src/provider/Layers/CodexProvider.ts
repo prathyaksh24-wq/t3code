@@ -20,6 +20,7 @@ import type {
   ModelCapabilities,
   ProviderOptionDescriptor,
   ServerProviderModel,
+  ServerProviderReportedCapability,
   ServerProviderSkill,
 } from "@t3tools/contracts";
 import { PREFERRED_DEFAULT_CODEX_MODELS, ServerSettingsError } from "@t3tools/contracts";
@@ -48,6 +49,8 @@ export interface CodexAppServerProviderSnapshot {
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
+  readonly reportedCapabilityKinds: ReadonlyArray<string>;
+  readonly reportedCapabilities: ReadonlyArray<ServerProviderReportedCapability>;
 }
 
 const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
@@ -263,6 +266,13 @@ function parseCodexSkillsListResponse(
       name: skill.name,
       path: skill.path,
       enabled: skill.enabled,
+      state: skill.enabled
+        ? { status: "enabled" }
+        : { status: "unavailable", reason: "This skill is disabled in Codex." },
+      source: {
+        kind: skill.scope?.trim().toLowerCase() || "runtime",
+        label: skill.scope ? `${skill.scope} skill` : "Codex runtime",
+      },
     };
 
     if (skill.description) {
@@ -282,6 +292,75 @@ function parseCodexSkillsListResponse(
   });
 }
 
+function describeCodexMcpServer(
+  server: CodexSchema.V2ListMcpServerStatusResponse__McpServerStatus,
+): string | undefined {
+  const parts = [
+    `${Object.keys(server.tools).length} tools`,
+    `${server.resources.length} resources`,
+    `${server.resourceTemplates.length} resource templates`,
+  ];
+  const description = server.serverInfo?.description?.trim();
+  return description ? `${description} · ${parts.join(" · ")}` : parts.join(" · ");
+}
+
+export function parseCodexMcpCapabilities(
+  response: CodexSchema.V2ListMcpServerStatusResponse,
+): ReadonlyArray<ServerProviderReportedCapability> {
+  return response.data.map((server) => {
+    const description = describeCodexMcpServer(server);
+    return {
+      id: `mcp-server:${server.name}`,
+      kind: "mcp-server",
+      name: server.serverInfo?.title?.trim() || server.name,
+      ...(description ? { description } : {}),
+      state:
+        server.authStatus === "notLoggedIn"
+          ? {
+              status: "misconfigured" as const,
+              reason: "This MCP server requires authentication in Codex.",
+            }
+          : { status: "enabled" as const },
+      source: { kind: "runtime-config", label: "Codex MCP configuration" },
+    };
+  });
+}
+
+export function parseCodexPluginCapabilities(
+  response: CodexSchema.V2PluginInstalledResponse,
+): ReadonlyArray<ServerProviderReportedCapability> {
+  return response.marketplaces.flatMap((marketplace) =>
+    marketplace.plugins.map((plugin) => {
+      const sourceLabel = marketplace.interface?.displayName?.trim() || marketplace.name;
+      const description =
+        plugin.interface?.shortDescription?.trim() ||
+        plugin.interface?.longDescription?.trim() ||
+        plugin.localVersion?.trim() ||
+        plugin.version?.trim();
+      const state: ServerProviderReportedCapability["state"] =
+        plugin.availability === "DISABLED_BY_ADMIN"
+          ? {
+              status: "permission-restricted",
+              reason: "This plugin is disabled by Codex administrator policy.",
+            }
+          : !plugin.installed
+            ? { status: "unavailable", reason: "This plugin is not installed in Codex." }
+            : !plugin.enabled
+              ? { status: "unavailable", reason: "This plugin is disabled in Codex." }
+              : { status: "enabled" };
+
+      return {
+        id: `plugin:${marketplace.name}:${plugin.id}`,
+        kind: "plugin",
+        name: plugin.interface?.displayName?.trim() || plugin.name,
+        ...(description ? { description } : {}),
+        state,
+        source: { kind: plugin.source.type, label: sourceLabel },
+      } satisfies ServerProviderReportedCapability;
+    }),
+  );
+}
+
 const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   client: CodexClient.CodexAppServerClient["Service"],
 ) {
@@ -298,6 +377,24 @@ const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   } while (cursor);
 
   return models;
+});
+
+const requestAllCodexMcpServers = Effect.fn("requestAllCodexMcpServers")(function* (
+  client: CodexClient.CodexAppServerClient["Service"],
+) {
+  const data: CodexSchema.V2ListMcpServerStatusResponse["data"][number][] = [];
+  let cursor: string | null | undefined = undefined;
+
+  do {
+    const response: CodexSchema.V2ListMcpServerStatusResponse = yield* client.request(
+      "mcpServerStatus/list",
+      cursor ? { cursor, detail: "toolsAndAuthOnly" } : { detail: "toolsAndAuthOnly" },
+    );
+    data.push(...response.data);
+    cursor = response.nextCursor;
+  } while (cursor);
+
+  return { data } satisfies CodexSchema.V2ListMcpServerStatusResponse;
 });
 
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
@@ -386,18 +483,27 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
       version,
       models: appendCustomCodexModels([], input.customModels ?? []),
       skills: [],
+      reportedCapabilityKinds: [],
+      reportedCapabilities: [],
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models] = yield* Effect.all(
+  const [skillsResponse, models, mcpResponse, pluginsResponse] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
+      requestAllCodexMcpServers(client).pipe(Effect.option),
+      client.request("plugin/installed", { cwds: [input.cwd] }).pipe(Effect.option),
     ],
     { concurrency: "unbounded" },
   );
+
+  const reportedCapabilities = [
+    ...(Option.isSome(mcpResponse) ? parseCodexMcpCapabilities(mcpResponse.value) : []),
+    ...(Option.isSome(pluginsResponse) ? parseCodexPluginCapabilities(pluginsResponse.value) : []),
+  ];
 
   return {
     account: accountResponse,
@@ -406,6 +512,12 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
       appendCustomCodexModels(models, input.customModels ?? []),
     ),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
+    reportedCapabilityKinds: [
+      "skill",
+      ...(Option.isSome(mcpResponse) ? ["mcp-server"] : []),
+      ...(Option.isSome(pluginsResponse) ? ["plugin"] : []),
+    ],
+    reportedCapabilities,
   } satisfies CodexAppServerProviderSnapshot;
 });
 
@@ -595,6 +707,8 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     checkedAt,
     models: snapshot.models,
     skills: snapshot.skills,
+    reportedCapabilityKinds: snapshot.reportedCapabilityKinds,
+    reportedCapabilities: snapshot.reportedCapabilities,
     probe: {
       installed: true,
       version: snapshot.version ?? null,

@@ -24,8 +24,40 @@ describe("ServerProvider", () => {
 
     expect(parsed.slashCommands).toEqual([]);
     expect(parsed.skills).toEqual([]);
+    expect(parsed.reportedCapabilityKinds).toBeUndefined();
+    expect(parsed.reportedCapabilities).toBeUndefined();
     expect(parsed.versionAdvisory).toBeUndefined();
     expect(parsed.updateState).toBeUndefined();
+  });
+
+  it("decodes runtime-owned capability inventory without closing future kinds", () => {
+    const parsed = decodeServerProvider({
+      instanceId: "codex",
+      driver: "codex",
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-04-10T00:00:00.000Z",
+      models: [],
+      reportedCapabilityKinds: ["mcp-server", "future-runtime-feature"],
+      reportedCapabilities: [
+        {
+          id: "mcp-server:github",
+          kind: "mcp-server",
+          name: "GitHub",
+          state: {
+            status: "permission-restricted",
+            reason: "Disabled by organization policy.",
+          },
+          source: { kind: "runtime-config", label: "Codex MCP configuration" },
+        },
+      ],
+    });
+
+    expect(parsed.reportedCapabilityKinds).toEqual(["mcp-server", "future-runtime-feature"]);
+    expect(parsed.reportedCapabilities?.[0]?.state.status).toBe("permission-restricted");
   });
 
   it("defaults one-click update support when decoding older advisory snapshots", () => {

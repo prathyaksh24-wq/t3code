@@ -5,6 +5,7 @@ import type {
   ServerProviderAuth,
   ServerProviderSkill,
   ServerProviderSlashCommand,
+  ServerProviderReportedCapability,
   ServerProviderModel,
   ServerProviderState,
 } from "@t3tools/contracts";
@@ -219,6 +220,8 @@ export function buildServerProvider(input: {
   models: ReadonlyArray<ServerProviderModel>;
   slashCommands?: ReadonlyArray<ServerProviderSlashCommand>;
   skills?: ReadonlyArray<ServerProviderSkill>;
+  reportedCapabilityKinds?: ReadonlyArray<string>;
+  reportedCapabilities?: ReadonlyArray<ServerProviderReportedCapability>;
   probe: ProviderProbeResult;
 }): ServerProviderDraft {
   const versionAdvisory = input.driver
@@ -247,6 +250,8 @@ export function buildServerProvider(input: {
     models: input.models,
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],
+    reportedCapabilityKinds: [...(input.reportedCapabilityKinds ?? [])],
+    reportedCapabilities: [...(input.reportedCapabilities ?? [])],
     ...(versionAdvisory ? { versionAdvisory } : {}),
   };
 }
