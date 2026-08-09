@@ -11,6 +11,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -55,20 +56,21 @@ export interface WorkspaceMutationGuardShape {
   }) => Effect.Effect<void>;
 }
 
-function normalizeWorkspacePath(value: string): string {
+function normalizeWorkspacePath(value: string, platform: NodeJS.Platform): string {
   const normalized = NodePath.normalize(NodePath.resolve(value));
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  return platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
-function canonicalizeWorkspacePath(workspacePath: string): Effect.Effect<string> {
-  return Effect.tryPromise({
+const canonicalizeWorkspacePath = Effect.fn("canonicalizeWorkspacePath")(function* (
+  workspacePath: string,
+) {
+  const platform = yield* HostProcessPlatform;
+  const resolvedPath = yield* Effect.tryPromise({
     try: () => NodeFSP.realpath(workspacePath),
     catch: () => undefined,
-  }).pipe(
-    Effect.map(normalizeWorkspacePath),
-    Effect.orElseSucceed(() => normalizeWorkspacePath(workspacePath)),
-  );
-}
+  }).pipe(Effect.orElseSucceed(() => workspacePath));
+  return normalizeWorkspacePath(resolvedPath, platform);
+});
 
 export class WorkspaceMutationGuard extends Context.Service<
   WorkspaceMutationGuard,
