@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import { isAbsolute, join, resolve } from "node:path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeModule from "node:module";
+import * as NodePath from "node:path";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -54,7 +54,9 @@ function browserCandidates(explicitPath) {
 }
 
 function findBrowserPath(explicitPath) {
-  const selected = browserCandidates(explicitPath).find((candidate) => existsSync(candidate));
+  const selected = browserCandidates(explicitPath).find((candidate) =>
+    NodeFS.existsSync(candidate),
+  );
   if (!selected) {
     throw new Error(
       "No supported Chromium browser was found. Pass --browser-path or set T3CODE_BROWSER_PATH.",
@@ -81,7 +83,7 @@ async function waitForDescriptor(webOrigin, timeoutMs) {
 }
 
 function issuePairingUrl({ repoRoot, baseDir, serverPort, webOrigin }) {
-  const output = execFileSync(
+  const output = NodeChildProcess.execFileSync(
     process.execPath,
     [
       "apps/server/src/bin.ts",
@@ -234,14 +236,15 @@ async function pairBrowser({ browser, repoRoot, baseDir, serverPort, webOrigin, 
 
 async function run() {
   const args = parseArgs(process.argv.slice(2));
-  const repoRoot = resolve(args.get("repo-root") ?? process.cwd());
-  const baseDir = resolve(required(args, "base-dir"));
+  const repoRoot = NodePath.resolve(args.get("repo-root") ?? process.cwd());
+  const baseDir = NodePath.resolve(required(args, "base-dir"));
   const serverPort = Number.parseInt(required(args, "server-port"), 10);
   const webUrl = new URL(required(args, "web-url"));
   const timeoutMs = Number.parseInt(args.get("timeout-ms") ?? String(DEFAULT_TIMEOUT_MS), 10);
   const browserPath = findBrowserPath(args.get("browser-path"));
 
-  if (!isAbsolute(baseDir)) throw new Error("--base-dir must resolve to an absolute path.");
+  if (!NodePath.isAbsolute(baseDir))
+    throw new Error("--base-dir must resolve to an absolute path.");
   if (!Number.isInteger(serverPort) || serverPort < 1 || serverPort > 65535) {
     throw new Error("--server-port must be a valid TCP port.");
   }
@@ -250,7 +253,9 @@ async function run() {
   }
   const webOrigin = webUrl.origin;
 
-  const require = createRequire(join(repoRoot, "apps", "desktop", "package.json"));
+  const require = NodeModule.createRequire(
+    NodePath.join(repoRoot, "apps", "desktop", "package.json"),
+  );
   const { chromium } = require("playwright-core");
 
   const browser = await chromium.launch({

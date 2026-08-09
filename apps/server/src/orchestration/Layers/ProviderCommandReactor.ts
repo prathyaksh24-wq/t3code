@@ -49,6 +49,10 @@ import {
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as WorkspaceMutationGuard from "../../workspace/WorkspaceMutationGuard.ts";
+
+const isWorkspaceMutationConflictError = Schema.is(
+  WorkspaceMutationGuard.WorkspaceMutationConflictError,
+);
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -316,9 +320,7 @@ const make = Effect.gen(function* () {
     if (providerError) {
       return providerError.detail;
     }
-    const workspaceConflict = Schema.is(WorkspaceMutationGuard.WorkspaceMutationConflictError)(
-      failReason?.error,
-    )
+    const workspaceConflict = isWorkspaceMutationConflictError(failReason?.error)
       ? failReason.error
       : undefined;
     if (workspaceConflict) {
