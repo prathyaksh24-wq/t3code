@@ -33,34 +33,129 @@ jobs:
       - name: Start isolated web environment
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p "$RUNNER_TEMP/t3-web-beta"
-          node scripts/dev-runner.ts dev --home-dir "$RUNNER_TEMP/t3-web-beta" \
-            > "$RUNNER_TEMP/t3-web-beta/dev.log" 2>&1 &
-          echo "$!" > "$RUNNER_TEMP/t3-web-beta/dev.pid"
+          node scripts/ci-web-server.mjs \
+            --base-dir "$RUNNER_TEMP/t3-web-beta" \
+            --log-path "$RUNNER_TEMP/t3-web-beta/dev.log" \
+            > "$RUNNER_TEMP/t3-web-beta/launcher.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/t3-web-beta/launcher.pid"
 
-      - name: Wait for migrations and seed beta state
+      - name: Wait for migrations
         shell: bash
         run: |
-          for attempt in {1..240}; do
-            if curl --fail --silent http://localhost:5733/.well-known/t3/environment > /dev/null; then
+          set -euo pipefail
+          base_dir="$RUNNER_TEMP/t3-web-beta"
+          dev_log="$base_dir/dev.log"
+          server_port=""
+          web_port=""
+          for attempt in {1..180}; do
+            runner_line="$(grep -m1 '\[dev-runner\].*serverPort=' "$dev_log" 2>/dev/null || true)"
+            if [[ -n "$runner_line" ]]; then
+              server_port="$(sed -E 's/.*serverPort=([0-9]+).*/\1/' <<< "$runner_line")"
+              web_port="$(sed -E 's/.*webPort=([0-9]+).*/\1/' <<< "$runner_line")"
+            fi
+            if [[ -n "$server_port" ]] && curl --fail --silent --max-time 2 \
+              "http://127.0.0.1:${server_port}/.well-known/t3/environment" > /dev/null; then
               break
             fi
-            if [[ "$attempt" == "240" ]]; then
-              cat "$RUNNER_TEMP/t3-web-beta/dev.log"
+            if [[ "$attempt" == "180" ]]; then
+              cat "$dev_log" || true
+              cat "$base_dir/launcher.log" || true
               exit 1
             fi
             sleep 0.5
           done
-          vp run beta:seed-web -- \
-            --base-dir "$RUNNER_TEMP/t3-web-beta" \
-            --isolated-fixture
+          if [[ -z "$server_port" || -z "$web_port" ]]; then
+            echo "The dev runner did not publish its selected ports." >&2
+            exit 1
+          fi
+          {
+            echo "T3_BETA_SERVER_PORT=$server_port"
+            echo "T3_BETA_WEB_PORT=$web_port"
+          } >> "$GITHUB_ENV"
+
+      - name: Stop server and seed beta state
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_dir="$RUNNER_TEMP/t3-web-beta"
+          launcher_pid="$(cat "$base_dir/launcher.pid")"
+          if kill -0 "$launcher_pid" 2>/dev/null; then
+            kill -TERM "$launcher_pid"
+          fi
+          for attempt in {1..120}; do
+            launcher_stopped="true"
+            if kill -0 "$launcher_pid" 2>/dev/null; then
+              launcher_stopped="false"
+            fi
+            server_stopped="false"
+            web_stopped="false"
+            if ! curl --silent --max-time 1 "http://127.0.0.1:${T3_BETA_SERVER_PORT}/.well-known/t3/environment" > /dev/null; then
+              server_stopped="true"
+            fi
+            if ! curl --silent --max-time 1 "http://127.0.0.1:${T3_BETA_WEB_PORT}/" > /dev/null; then
+              web_stopped="true"
+            fi
+            if [[ "$launcher_stopped" == "true" && "$server_stopped" == "true" && "$web_stopped" == "true" ]]; then
+              break
+            fi
+            if [[ "$attempt" == "120" ]]; then
+              echo "The isolated dev process did not release its ports before seeding." >&2
+              cat "$base_dir/dev.log" || true
+              cat "$base_dir/launcher.log" || true
+              exit 1
+            fi
+            sleep 0.5
+          done
+          timeout --signal=TERM --kill-after=10s 120s vp run beta:seed-web -- \
+            --base-dir "$base_dir" \
+            --isolated-fixture > "$base_dir/seed.log" 2>&1 || {
+              status=$?
+              cat "$base_dir/seed.log" || true
+              exit "$status"
+            }
+
+      - name: Restart seeded web environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_dir="$RUNNER_TEMP/t3-web-beta"
+          node scripts/ci-web-server.mjs \
+            --base-dir "$base_dir" \
+            --log-path "$base_dir/dev.log" \
+            >> "$base_dir/launcher.log" 2>&1 &
+          echo "$!" > "$base_dir/launcher.pid"
+          for attempt in {1..180}; do
+            runner_line="$(grep '\[dev-runner\].*serverPort=' "$base_dir/dev.log" 2>/dev/null | tail -n1 || true)"
+            if [[ -n "$runner_line" ]]; then
+              T3_BETA_SERVER_PORT="$(sed -E 's/.*serverPort=([0-9]+).*/\1/' <<< "$runner_line")"
+              T3_BETA_WEB_PORT="$(sed -E 's/.*webPort=([0-9]+).*/\1/' <<< "$runner_line")"
+              {
+                echo "T3_BETA_SERVER_PORT=$T3_BETA_SERVER_PORT"
+                echo "T3_BETA_WEB_PORT=$T3_BETA_WEB_PORT"
+              } >> "$GITHUB_ENV"
+            fi
+            if curl --fail --silent --max-time 2 \
+              "http://127.0.0.1:${T3_BETA_SERVER_PORT}/.well-known/t3/environment" > /dev/null && \
+              curl --fail --silent --max-time 2 \
+              "http://127.0.0.1:${T3_BETA_WEB_PORT}/" > /dev/null; then
+              exit 0
+            fi
+            if [[ "$attempt" == "180" ]]; then
+              cat "$base_dir/dev.log" || true
+              cat "$base_dir/launcher.log" || true
+              exit 1
+            fi
+            sleep 0.5
+          done
 
       - name: Capture required states and enforce performance budgets
         run: |
           vp run beta:capture-web -- \
             --base-dir "$RUNNER_TEMP/t3-web-beta" \
-            --server-port 13773 \
-            --web-url http://localhost:5733 \
+            --server-port "$T3_BETA_SERVER_PORT" \
+            --web-url "http://localhost:${T3_BETA_WEB_PORT}" \
             --browser-path /usr/bin/google-chrome \
             --output-dir artifacts/beta-web
 
@@ -68,10 +163,10 @@ jobs:
         if: always()
         shell: bash
         run: |
-          pid_file="$RUNNER_TEMP/t3-web-beta/dev.pid"
+          pid_file="$RUNNER_TEMP/t3-web-beta/launcher.pid"
           if [[ -f "$pid_file" ]]; then
-            dev_pid="$(cat "$pid_file")"
-            kill "$dev_pid" 2>/dev/null || true
+            launcher_pid="$(cat "$pid_file")"
+            kill -TERM "$launcher_pid" 2>/dev/null || true
           fi
 
       - name: Upload captures, report, and dev log
@@ -82,5 +177,7 @@ jobs:
           path: |
             artifacts/beta-web/**
             ${{ runner.temp }}/t3-web-beta/dev.log
+            ${{ runner.temp }}/t3-web-beta/seed.log
+            ${{ runner.temp }}/t3-web-beta/launcher.log
           if-no-files-found: warn
           retention-days: 14
