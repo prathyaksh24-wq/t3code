@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import * as NodeFS from "node:fs";
 import * as NodeURL from "node:url";
 
 import {
@@ -10,6 +11,16 @@ const repositoryRoot = NodeURL.fileURLToPath(new URL("../", import.meta.url));
 
 it("keeps fork workflows on available runners and outside upstream production accounts", () => {
   assert.deepEqual(findForkWorkflowPolicyViolations(repositoryRoot), []);
+});
+
+it("probes the Vite web server through localhost", () => {
+  const workflow = NodeFS.readFileSync(
+    NodeURL.fileURLToPath(new URL("../.github/workflows/beta-web-captures.yml", import.meta.url)),
+    "utf8",
+  );
+
+  assert.match(workflow, /http:\/\/localhost:\$\{T3_BETA_WEB_PORT\}/);
+  assert.notMatch(workflow, /http:\/\/127\.0\.0\.1:\$\{T3_BETA_WEB_PORT\}/);
 });
 
 it("allows a standard hosted runner and the built-in GitHub token", () => {

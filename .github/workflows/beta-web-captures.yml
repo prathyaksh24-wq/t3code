@@ -94,7 +94,7 @@ jobs:
             if ! curl --silent --max-time 1 "http://127.0.0.1:${T3_BETA_SERVER_PORT}/.well-known/t3/environment" > /dev/null; then
               server_stopped="true"
             fi
-            if ! curl --silent --max-time 1 "http://127.0.0.1:${T3_BETA_WEB_PORT}/" > /dev/null; then
+            if ! curl --silent --max-time 1 "http://localhost:${T3_BETA_WEB_PORT}/" > /dev/null; then
               web_stopped="true"
             fi
             if [[ "$launcher_stopped" == "true" && "$server_stopped" == "true" && "$web_stopped" == "true" ]]; then
@@ -139,7 +139,7 @@ jobs:
             if curl --fail --silent --max-time 2 \
               "http://127.0.0.1:${T3_BETA_SERVER_PORT}/.well-known/t3/environment" > /dev/null && \
               curl --fail --silent --max-time 2 \
-              "http://127.0.0.1:${T3_BETA_WEB_PORT}/" > /dev/null; then
+              "http://localhost:${T3_BETA_WEB_PORT}/" > /dev/null; then
               exit 0
             fi
             if [[ "$attempt" == "180" ]]; then
