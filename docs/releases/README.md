@@ -21,5 +21,7 @@ Use each release surface for one purpose:
 For the local one-to-three-user rollout, follow [Small beta operations](./small-beta.md) and the
 [Provider qualification matrix](./provider-qualification.md). The **Fork Beta Artifact** workflow
 creates an unsigned Windows test artifact without publishing through upstream-owned services.
+The shipped foundation and current limitations are summarized in
+[Standalone foundation beta notes](./standalone-foundation-beta.md).
 
 The inherited T3 release, relay deployment, and Expo delivery workflows are archived under `docs/upstream/workflows/`. They are documentation, not active GitHub Actions workflows. Do not restore them until every external account in `prerequisites.md` has a named fork owner, a least-privilege credential, a reviewed release path, and a tested rollback path.
