@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - This policy test reads workflow fixtures from disk.
 import { assert, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 import * as NodeURL from "node:url";
