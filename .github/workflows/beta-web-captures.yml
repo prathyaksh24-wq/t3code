@@ -152,7 +152,7 @@ jobs:
 
       - name: Capture required states and enforce performance budgets
         run: |
-          vp run beta:capture-web -- \
+          vp run beta:capture-web \
             --base-dir "$RUNNER_TEMP/t3-web-beta" \
             --server-port "$T3_BETA_SERVER_PORT" \
             --web-url "http://localhost:${T3_BETA_WEB_PORT}" \

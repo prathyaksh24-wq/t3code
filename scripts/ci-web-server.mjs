@@ -2,10 +2,13 @@
 
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 const STOP_GRACE_PERIOD_MS = 15_000;
 const STOP_FORCE_PERIOD_MS = 5_000;
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone CI launcher has no Effect runtime.
+const hostPlatform = NodeOS.platform();
 
 function parseArgs(argv) {
   const args = new Map();
@@ -33,7 +36,7 @@ function wait(milliseconds) {
 
 function sendSignal(child, signal) {
   if (!child.pid || child.exitCode !== null) return;
-  if (process.platform === "win32") {
+  if (hostPlatform === "win32") {
     child.kill(signal);
     return;
   }
@@ -59,7 +62,7 @@ const child = NodeChildProcess.spawn(
   ["scripts/dev-runner.ts", "dev", "--home-dir", baseDir],
   {
     cwd: repoRoot,
-    detached: process.platform !== "win32",
+    detached: hostPlatform !== "win32",
     env: { ...process.env, T3CODE_NO_BROWSER: "1" },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,

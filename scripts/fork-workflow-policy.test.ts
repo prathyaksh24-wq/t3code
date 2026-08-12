@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - This policy test reads workflow fixtures from disk.
 import { assert, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 import * as NodeURL from "node:url";
@@ -21,6 +22,15 @@ it("probes the Vite web server through localhost", () => {
 
   assert.match(workflow, /http:\/\/localhost:\$\{T3_BETA_WEB_PORT\}/);
   assert.notMatch(workflow, /http:\/\/127\.0\.0\.1:\$\{T3_BETA_WEB_PORT\}/);
+});
+
+it("passes beta capture arguments without a forwarded separator", () => {
+  const workflow = NodeFS.readFileSync(
+    NodeURL.fileURLToPath(new URL("../.github/workflows/beta-web-captures.yml", import.meta.url)),
+    "utf8",
+  );
+
+  assert.notMatch(workflow, /vp run beta:capture-web -- \\/);
 });
 
 it("allows a standard hosted runner and the built-in GitHub token", () => {
