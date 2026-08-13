@@ -38,6 +38,7 @@ import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
+const CODEX_OPTIONAL_CAPABILITY_PROBE_TIMEOUT_MS = 5_000;
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -397,6 +398,47 @@ const requestAllCodexMcpServers = Effect.fn("requestAllCodexMcpServers")(functio
   return { data } satisfies CodexSchema.V2ListMcpServerStatusResponse;
 });
 
+interface CodexProviderInventoryRequests {
+  readonly skills: Effect.Effect<CodexSchema.V2SkillsListResponse, CodexErrors.CodexAppServerError>;
+  readonly models: Effect.Effect<
+    ReadonlyArray<ServerProviderModel>,
+    CodexErrors.CodexAppServerError
+  >;
+  readonly mcp: Effect.Effect<
+    CodexSchema.V2ListMcpServerStatusResponse,
+    CodexErrors.CodexAppServerError
+  >;
+  readonly plugins: Effect.Effect<
+    CodexSchema.V2PluginInstalledResponse,
+    CodexErrors.CodexAppServerError
+  >;
+}
+
+export const collectCodexProviderInventory = Effect.fn("collectCodexProviderInventory")(function* (
+  requests: CodexProviderInventoryRequests,
+  optionalCapabilityTimeoutMs = CODEX_OPTIONAL_CAPABILITY_PROBE_TIMEOUT_MS,
+) {
+  const [skillsResponse, models, mcpResponse, pluginsResponse] = yield* Effect.all(
+    [
+      requests.skills,
+      requests.models,
+      requests.mcp.pipe(
+        Effect.option,
+        Effect.timeoutOption(Duration.millis(optionalCapabilityTimeoutMs)),
+        Effect.map(Option.flatten),
+      ),
+      requests.plugins.pipe(
+        Effect.option,
+        Effect.timeoutOption(Duration.millis(optionalCapabilityTimeoutMs)),
+        Effect.map(Option.flatten),
+      ),
+    ],
+    { concurrency: "unbounded" },
+  );
+
+  return { skillsResponse, models, mcpResponse, pluginsResponse };
+});
+
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   return {
     clientInfo: {
@@ -488,17 +530,15 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models, mcpResponse, pluginsResponse] = yield* Effect.all(
-    [
-      client.request("skills/list", {
+  const { skillsResponse, models, mcpResponse, pluginsResponse } =
+    yield* collectCodexProviderInventory({
+      skills: client.request("skills/list", {
         cwds: [input.cwd],
       }),
-      requestAllCodexModels(client),
-      requestAllCodexMcpServers(client).pipe(Effect.option),
-      client.request("plugin/installed", { cwds: [input.cwd] }).pipe(Effect.option),
-    ],
-    { concurrency: "unbounded" },
-  );
+      models: requestAllCodexModels(client),
+      mcp: requestAllCodexMcpServers(client),
+      plugins: client.request("plugin/installed", { cwds: [input.cwd] }),
+    });
 
   const reportedCapabilities = [
     ...(Option.isSome(mcpResponse) ? parseCodexMcpCapabilities(mcpResponse.value) : []),

@@ -30,6 +30,10 @@ the user has no configuration. Capability inventory is read-only: T3 Code does n
 runtime's settings into another runtime. Web and mobile invocation surfaces also exclude items whose
 reported state is not enabled.
 
+Provider health and model discovery do not depend on optional capability inventory. Optional MCP or
+plugin inventory is time-bounded per provider; when it is unavailable, the provider remains usable
+and the omitted capability kind is treated as not reported by the runtime.
+
 ## Client transport
 
 `wsTransport.ts` manages connection state: `connecting` → `open` → `reconnecting` → `closed` → `disposed`. Outbound requests are queued while disconnected and flushed on reconnect. Inbound pushes are decoded and validated at the boundary, then cached per channel. Subscribers can opt into `replayLatest` to receive the last push on subscribe.
