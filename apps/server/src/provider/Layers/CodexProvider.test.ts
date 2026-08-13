@@ -1,11 +1,39 @@
 import { assert, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
+import * as TestClock from "effect/testing/TestClock";
 
 import {
   applyPreferredCodexDefaultModel,
+  collectCodexProviderInventory,
   mapCodexModelCapabilities,
   parseCodexMcpCapabilities,
   parseCodexPluginCapabilities,
 } from "./CodexProvider.ts";
+
+it.effect("does not let optional capability inventory block core provider discovery", () =>
+  Effect.gen(function* () {
+    const inventoryFiber = yield* collectCodexProviderInventory(
+      {
+        skills: Effect.succeed({ data: [] }),
+        models: Effect.succeed([]),
+        mcp: Effect.never,
+        plugins: Effect.succeed({ marketplaces: [] }),
+      },
+      50,
+    ).pipe(Effect.timeoutOption("100 millis"), Effect.forkChild);
+
+    yield* TestClock.adjust("101 millis");
+    const inventory = yield* Fiber.join(inventoryFiber);
+
+    assert.strictEqual(Option.isSome(inventory), true);
+    if (Option.isSome(inventory)) {
+      assert.strictEqual(Option.isNone(inventory.value.mcpResponse), true);
+      assert.strictEqual(Option.isSome(inventory.value.pluginsResponse), true);
+    }
+  }),
+);
 
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({
